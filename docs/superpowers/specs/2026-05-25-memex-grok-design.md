@@ -1,7 +1,7 @@
 # memex-grok — Design Spec
 
 **Date**: 2026-05-25
-**Status**: Approved for implementation planning
+**Status**: Approved pending prerequisite validation (see §Implementation prerequisites)
 **Related**: [memex-claude](https://github.com/jim80net/memex-claude), [@jim80net/memex-core](https://github.com/jim80net/memex-core)
 
 ## Goal
@@ -44,8 +44,10 @@ Build memex-grok as a **separate plugin** (not a unified adapter, not a Claude-s
 - Shares `@jim80net/memex-core` with memex-claude for SkillIndex, embeddings, sync, and telemetry.
 - Exposes a **stdio MCP server** (`memex`) to grok's model, mirroring grok's own
   `memory_search`/`memory_get` pattern. The model deliberately invokes search when relevant.
-- Ships a **dormant `UserPromptSubmit` hook** that becomes the auto-injection path the day grok
-  starts honoring `additionalContext` — flipped by a config flag, no refactor needed.
+- Ships **dormant hooks** (`UserPromptSubmit`, `Stop`, `PreCompact`) that become the
+  auto-injection path when grok adds hook-driven context injection — activated by config flags,
+  with one new serializer for whatever wire format grok adopts. The match-computation logic is
+  fully reused; only serialization changes.
 - Treats grok's native memory and skill systems as **complementary, not competing**: memex is the
   cross-harness sync corpus; grok-native memory remains for grok-only workflows.
 
@@ -54,20 +56,26 @@ The sync repo is the source of truth. Each harness has its own materializer.
 ## Architecture
 
 ```
-              ~/.local/share/memex/             (cross-harness sync repo — was memex-claude)
-                       │
-                       ▼
-              @jim80net/memex-core              (shared engine)
-                       │
-   ┌───────────────────┼───────────────────────────────────────┐
-   ▼                   ▼                                       ▼
-MCP server      SessionStart hook                  UserPromptSubmit hook
-(always on)     (sync pull, index refresh)         (DORMANT today — future-ready)
-─────────       ─────────                          ─────────
-memex_search    grok plugin install               When grok honors additionalContext:
-memex_read_skill triggers init                    flip flag, hookSpecificOutput emits.
-memex_record_match                                MCP tool remains as the deliberate
-memex_status                                      deeper-search complement.
+            ~/.local/share/memex/         (cross-harness sync repo — was memex-claude)
+                     │
+                     ▼
+            @jim80net/memex-core          (shared engine: SkillIndex, embeddings, sync,
+                     │                     canonicalProjectId)
+   ┌─────────────────┼───────────────────────────────────────────────────┐
+   ▼                 ▼                                                   ▼
+MCP server     SessionStart hook                    UserPromptSubmit / Stop / PreCompact
+(PRIMARY)      (best-effort warm-up)                (DORMANT — future-ready)
+─────────      ─────────                            ─────────
+memex_search   if plugin hooks fire,                Wired in hooks.json; gated by config.
+memex_read_skill  pull sync repo eagerly            When grok ships injection (any wire
+memex_status   and warm the cache.                  format), add serializer + flip flag.
+               If they don't, MCP server
+First-call init  picks up the work on
+performs sync    first tool call. No
+pull + index     user-visible degradation.
+rebuild — does
+not depend on
+SessionStart.
 ```
 
 ## Components
@@ -88,46 +96,86 @@ Built with Bun, self-contained per-platform binary, same packaging pattern as me
 
 ### MCP server (`memex mcp`)
 
-Stdio JSON-RPC. Exposes four tools to the model:
+Stdio JSON-RPC. The MCP server is the **primary entry point** for memex on grok — it is also
+responsible for sync-repo pull and index refresh on first call (the SessionStart hook is best-
+effort, see below). Exposes three tools to the model:
 
 | Tool | Args | Returns |
 |---|---|---|
-| `memex_search` | `query: string`, `top_k?: int (default 5)`, `threshold?: float (default 0.5)`, `types?: ("skill"\|"memory"\|"rule"\|"workflow"\|"session-learning"\|"tool-guidance")[]` | Array of `{name, type, location, relevance, description, best_query_index}` |
-| `memex_read_skill` | `location: string` | Full skill/rule/memory content |
-| `memex_record_match` | `location: string`, `query_index: int`, `session_id: string` | ack — feeds telemetry for GEPA query refinement |
-| `memex_status` | (none) | `{index_size, source_counts, last_sync_at, sync_enabled}` |
+| `memex_search` | `query: string`, `top_k?: int (default 5)`, `threshold?: float (default 0.5)`, `types?: ("skill"\|"memory"\|"rule"\|"workflow"\|"session-learning"\|"tool-guidance")[]` | `{query_id: string, results: Array<{name, type, location, relevance, description, best_query_index}>}` |
+| `memex_read_skill` | `location: string`, `query_id?: string` | Full skill/rule/memory content. Internally records a telemetry match for `(location, query_id, session_id)` so GEPA-style query refinement works without requiring a separate model-issued tool call. |
+| `memex_status` | (none) | `{index_size, source_counts, last_sync_at, sync_enabled, embedding_model}` |
 
-Tool description (visible to the model) explicitly orients it toward semantic recall:
+`memex_record_match` from earlier drafts is removed — model-issued telemetry calls were judged
+unreliable (models do not consistently make courtesy tool calls after using a result). Telemetry
+is now recorded implicitly when the model reads a matched skill.
 
-> "Search the user's cross-harness memex corpus — curated skills, memories, and rules indexed by
-> semantic embedding. Use this when you need procedural know-how, project conventions, or
-> personal preferences that may have been recorded across past sessions. Complements grok's
-> built-in `memory_search` (which covers only this workspace's grok memory)."
+Tool descriptions (visible to the model) must clearly differentiate from grok's native
+`memory_search` to avoid the model picking arbitrarily:
 
-### SessionStart hook (`memex hook`, event = `session_start`)
+> **`memex_search`**: Search the user's cross-harness memex corpus — curated skills, rules, and
+> long-lived preferences synced via git across machines and AI coding harnesses. Use this for
+> procedural know-how ("how do I deploy X?"), coding conventions, recurring workflows, or
+> personal preferences likely to have been recorded across past sessions. **This is different
+> from `memory_search`**, which only covers grok's per-workspace conversational memory.
 
+If memex-grok determines at startup that grok's `memory_search` is available, it prepends a
+note in the tool description: *"Use this BEFORE `memory_search` for any question that might be
+answered by a durable skill or rule."*
+
+### First-call initialization (sync + index)
+
+On the first MCP tool call of a session:
+
+1. If `config.sync.enabled && config.sync.autoPull` and mtime of sync repo's `.git/FETCH_HEAD`
+   is older than `config.sync.pullCacheMs` (default 5 min), run `git pull --rebase`.
+2. Rebuild the SkillIndex if any source-dir mtime changed since the cache's `built_at`.
+3. Serve the tool call.
+
+This means the system functions whether or not the SessionStart hook fires. The hook, when it
+fires, only warms up the cache — it is not on the critical path.
+
+### SessionStart hook (`memex hook`, event = `session_start`) — BEST-EFFORT
+
+The probe found plugin-sourced hooks did not fire in grok 0.1.219 headless mode. The hook is
+still wired (in case it fires interactively or in future versions), but the **first-call
+initialization in the MCP server is the authoritative path** for sync-pull and indexing.
+
+When (if) this hook fires:
 - Parses grok-native hook JSON from stdin (`hookEventName`, `sessionId`, `workspaceRoot`, etc.).
 - Normalizes to memex-core's `HookInput` shape via `src/hooks/input.ts` adapter.
-- Pulls sync repo if `config.sync.enabled && config.sync.autoPull`.
-- Touches the cache mtime to invalidate; next MCP call rebuilds index.
+- Performs the same sync-pull + cache-invalidation that first-call MCP would do, eagerly.
 - Writes a one-line status to stderr (visible in `grok inspect` annotations).
 - Exits 0; stdout is ignored by grok today.
 
+If the hook does not fire, the MCP server picks up the work transparently — no user-visible
+degradation, just a one-time latency hit on the first `memex_search` of the session.
+
 ### UserPromptSubmit hook (`memex hook`, event = `user_prompt_submit`) — DORMANT
 
-Wired in `hooks/hooks.json` so it's ready when grok ships `additionalContext` support, but
-internally gated:
+Wired in `hooks/hooks.json` and ready to activate when grok ships hook-driven context injection.
+Internally gated:
 
 ```ts
 if (!config.hooks.UserPromptSubmit.injectAdditionalContext) {
   // Today: log match count to stderr only, exit 0.
-  process.stderr.write(`memex: matched N — additionalContext not yet honored by grok\n`);
+  process.stderr.write(`memex: matched N — context injection not yet honored by grok\n`);
   return;
 }
-// Future: emit hookSpecificOutput with matches (same code path as memex-claude).
+// Future: serialize matches in whatever wire format grok adopts.
+emitInjection(matches, config.hooks.UserPromptSubmit.wireFormat);
 ```
 
-Default: `false`. Users (or `memex doctor`) flip it once grok lands support.
+Default: `false`. The `wireFormat` config defaults to `"claude_hook_specific_output"` (today's
+Claude convention) but is overridable. When grok publishes its injection spec, the appropriate
+serializer is added to `src/hooks/injection-serializers.ts` and users select it via config.
+
+### Dormant Stop and PreCompact hooks
+
+Wired in `hooks/hooks.json` alongside UserPromptSubmit. Today: log-only. When grok confirms
+these events fire reliably from plugin hooks and supports any associated stdout semantics, the
+handlers (ported from memex-claude) activate via config flags. Same dormancy/activation
+pattern as UserPromptSubmit.
 
 ### Hook input adapter (`src/hooks/input.ts`)
 
@@ -177,8 +225,8 @@ Ported from memex-claude, adjusted for grok-native paths:
 
 | Skill | Purpose | grok-specific changes |
 |---|---|---|
-| `sleep` | Lifecycle: migrate MEMORY.md → skills, promote/demote by telemetry | Reads `~/.grok/memory/<slug-hash>/MEMORY.md` |
-| `deep-sleep` | Extract learnings from past sessions | Reads `~/.grok/memory/<slug-hash>/sessions/` and grok session transcripts |
+| `sleep` | Lifecycle: extract entries from MEMORY.md into searchable skills, promote/demote by telemetry | **Read-only** against `~/.grok/memory/<slug-hash>/MEMORY.md`; all writes go to the sync repo's `skills/` dir. Never modifies grok-owned files (grok's file watcher would reindex on every edit and could trigger reindex loops). |
+| `deep-sleep` | Extract learnings from past sessions | **Read-only** against `~/.grok/memory/<slug-hash>/sessions/` and grok session transcripts. Writes go to sync repo. |
 | `reflect` | Single-session learning extraction | Same |
 | `doctor` | Install diagnosis | Checks `~/.grok/` paths, MCP registration, hook trust |
 | `handoff` | Create continuation plan | grok session format |
@@ -199,20 +247,46 @@ Skills live in `skills/` (auto-discovered by grok as plugin skills).
 | Memory (memex concept) | `~/.grok/memory/<slug-hash>/MEMORY.md`, plus `sessions/*.md` | Workspace-scoped, hash derived from git remote URL |
 | Sync repo | `~/.local/share/memex/{skills,rules,projects/<canonical-id>/memory}` | Same shape as memex-claude's sync repo |
 
-### Project memory mapping
+### Project memory mapping — CRITICAL PREREQUISITE
 
-memex-claude encodes `cwd` to derive a project ID. grok uses `<slug>-<hash8>` from the git remote
-URL. Both must map to the same **canonical-id** in the sync repo for cross-harness portability.
+memex-claude today derives its sync-repo project ID by calling `encodeProjectPath(cwd)` from
+memex-core, which encodes the absolute filesystem path. grok identifies a workspace by
+`<slug>-<hash8>` derived from the git remote URL. **These two algorithms produce different IDs
+for the same project** — meaning a naive port would silently fragment the corpus into two
+unmerged buckets under `<sync-repo>/projects/`.
+
+**Prerequisite (blocks any sync-repo writes from memex-grok):**
+
+A canonical project-id algorithm must be defined in `@jim80net/memex-core` and adopted by both
+harnesses before memex-grok writes to the sync repo. The algorithm:
+
+1. If a git remote `origin` exists, derive ID from a normalized form of the remote URL (strip
+   protocol, lowercase host, strip `.git`, replace non-alphanumerics with `-`, append short
+   hash). This matches grok's existing convention but is harness-agnostic.
+2. If no git remote, fall back to `encodeProjectPath(cwd)` (matches memex-claude's current
+   behavior for non-git projects).
+3. Always honor an explicit `config.sync.projectMappings[<local-id>] = <canonical-id>` override
+   for users with renamed/moved projects.
+
+**Rollout order (mandatory):**
+
+1. Add `canonicalProjectId()` to memex-core and release a new minor version.
+2. Release memex-claude with a migration that reads the OLD `encodeProjectPath`-keyed dirs and
+   moves them under the new canonical IDs (with a `memex doctor --migrate-project-ids` command).
+3. Only after step 2 is shipped and the user has migrated, memex-grok ships v0.1.0 writing under
+   the new canonical IDs.
+
+Until the user runs the migration, memex-grok operates in **read-only-sync mode**: it can index
+and surface entries from the sync repo (preferring matches under canonical IDs but falling back
+to legacy IDs if present), but does not write back to `projects/<id>/memory/`. Writes go to
+grok-local paths only. `memex doctor` reports this state and links to the migration command.
 
 `src/core/memory-mapping.ts` resolves:
 
 1. **Grok local ID**: read git remote of cwd → `<slug>-<hash8>` (matches grok's own convention).
-2. **Canonical ID**: look up `config.sync.projectMappings[<grok-local-id>]`; if absent, derive
-   from git remote URL (canonical algorithm shared with memex-claude via memex-core).
+2. **Canonical ID**: call `canonicalProjectId(cwd)` from memex-core. Honors
+   `config.sync.projectMappings` overrides.
 3. **Sync memory dir**: `<sync-repo>/projects/<canonical-id>/memory/`.
-
-This means a user with the same sync repo cloned on two machines — one using Claude, one using
-grok — gets the same memex memories surfaced on both.
 
 ## Plugin layout
 
@@ -232,17 +306,21 @@ memex-grok/
 │   ├── handoff/SKILL.md
 │   ├── takeover/SKILL.md
 │   └── help/SKILL.md
-├── bin/                          # platform binaries downloaded post-install
-│   └── memex
+├── bin/
+│   ├── memex                     # POSIX shell stub; downloads platform binary on first run
+│   └── memex.cmd                 # Windows variant
 ├── src/
 │   ├── main.ts                   # entry, dispatches on argv[2]
 │   ├── mcp/
 │   │   ├── server.ts             # MCP stdio JSON-RPC loop
 │   │   └── tools.ts              # tool implementations
 │   ├── hooks/
-│   │   ├── session-start.ts      # active
+│   │   ├── session-start.ts      # best-effort warm-up
 │   │   ├── user-prompt.ts        # dormant, gated by config
-│   │   └── input.ts              # grok wire-format adapter
+│   │   ├── stop.ts               # dormant, gated by config
+│   │   ├── pre-compact.ts        # dormant, gated by config
+│   │   ├── input.ts              # grok wire-format adapter (input)
+│   │   └── injection-serializers.ts  # output serializers per wireFormat
 │   ├── cli/
 │   │   ├── sync.ts
 │   │   ├── doctor.ts
@@ -291,26 +369,30 @@ memex-grok/
 ```json
 {
   "hooks": {
-    "SessionStart": [
-      { "hooks": [
-        { "type": "command",
-          "command": "${CLAUDE_PLUGIN_ROOT}/bin/memex hook",
-          "timeout": 15 }
-      ] }
-    ],
-    "UserPromptSubmit": [
-      { "hooks": [
-        { "type": "command",
-          "command": "${CLAUDE_PLUGIN_ROOT}/bin/memex hook",
-          "timeout": 10 }
-      ] }
-    ]
+    "SessionStart":      [ { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/memex hook", "timeout": 15 } ] } ],
+    "UserPromptSubmit":  [ { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/memex hook", "timeout": 10 } ] } ],
+    "Stop":              [ { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/memex hook", "timeout": 30 } ] } ],
+    "PreCompact":        [ { "hooks": [ { "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/bin/memex hook", "timeout": 10 } ] } ]
   }
 }
 ```
 
-Both hooks use `${CLAUDE_PLUGIN_ROOT}` because grok exports both `CLAUDE_PLUGIN_ROOT` and
-`GROK_PLUGIN_ROOT` for plugin hooks. The Claude variant is more portable across marketplaces.
+All four hooks point at the same `memex hook` dispatcher. SessionStart is best-effort
+initialization; UserPromptSubmit, Stop, and PreCompact are dormant in v1 (config-gated). The
+hooks are wired now so activation is a config change rather than a release.
+
+The `${CLAUDE_PLUGIN_ROOT}` variable: the hooks documentation claims grok exports both
+`CLAUDE_PLUGIN_ROOT` and `GROK_PLUGIN_ROOT` for plugin hooks. The Claude variant is more
+portable across the Claude/grok plugin ecosystems. If validation reveals only `GROK_PLUGIN_ROOT`
+is set, the build emits an alternate `hooks.json` with `${GROK_PLUGIN_ROOT}` substituted.
+
+### Bin stub
+
+`bin/memex` is a small POSIX shell stub committed to the repo. On invocation, if the platform
+binary is not yet downloaded into `${HOME}/.cache/memex-grok/<version>/<platform>/memex`, it
+downloads and verifies (sha256 sum from the release) before exec'ing it. This makes
+`grok plugin install` work without a post-install script and avoids the cross-platform install-
+script headaches memex-claude has dealt with. The Windows variant ships as `bin/memex.cmd`.
 
 ## Config
 
@@ -329,54 +411,103 @@ Both hooks use `${CLAUDE_PLUGIN_ROOT}` because grok exports both `CLAUDE_PLUGIN_
     "projectMappings": {}
   },
   "hooks": {
+    "SessionStart":    { "enabled": true },
     "UserPromptSubmit": {
       "enabled": true,
-      "injectAdditionalContext": false,  // dormant; flip when grok supports it
+      "injectAdditionalContext": false,    // dormant; flip when grok ships injection
+      "wireFormat": "claude_hook_specific_output",  // future: "grok_native_v1" etc.
       "topK": 3,
       "threshold": 0.5,
       "maxInjectedChars": 8000,
       "types": ["skill", "memory", "workflow", "session-learning", "rule"]
-    }
+    },
+    "Stop":             { "enabled": false, "extractLearnings": true, "behavioralRules": true },
+    "PreCompact":       { "enabled": false }
   },
   "mcp": {
     "enabled": true,
-    "tools": ["memex_search", "memex_read_skill", "memex_record_match", "memex_status"]
+    "tools": ["memex_search", "memex_read_skill", "memex_status"]
   }
 }
 ```
 
 ## Sync repo path migration
 
-memex-claude currently uses `~/.local/share/memex-claude/`. memex-grok defaults to
-`~/.local/share/memex/`. Both honor `config.sync.repoDir`, so users can interop today by setting
-the same path on both.
+memex-claude currently uses `~/.local/share/memex-claude/`. memex-grok prefers
+`~/.local/share/memex/` (harness-agnostic). Both honor `config.sync.repoDir`, so users can
+interop today by setting the same path on both.
 
-A coordinated memex-claude release will:
+**The risk to avoid:** a user installs memex-grok before updating memex-claude, ends up with two
+unmerged repos at `~/.local/share/memex-claude/` and `~/.local/share/memex/`, and accumulates
+divergent writes that are hard to reconcile.
 
-1. Default to `~/.local/share/memex/` if it exists.
-2. Fall back to `~/.local/share/memex-claude/` if only that exists (no auto-migration).
-3. Surface a `memex doctor`-style suggestion to rename for clarity.
+**memex-grok's safety policy:**
 
-This keeps the migration **opt-in and non-destructive**.
+1. At first run, if `~/.local/share/memex-claude/` exists and is a non-empty git repo, **do not
+   create `~/.local/share/memex/`**. Instead, set the effective sync repo to the existing
+   `memex-claude/` directory and log a one-line suggestion to run `memex doctor --migrate-repo`.
+2. `memex doctor --migrate-repo` performs `git mv` (or `mv` for the workdir) of
+   `~/.local/share/memex-claude/` to `~/.local/share/memex/`, leaving a symlink at the old path
+   for backward compatibility. The operation is interactive (asks for confirmation) and
+   reversible (no destructive removal).
+3. After migration, the symlink keeps any not-yet-updated memex-claude install reading from the
+   same data.
+
+**memex-claude's coordinated release (separate change request, tracked under the same effort):**
+
+1. Default sync repo: `~/.local/share/memex/` if it exists or is a symlink target; else fall
+   back to `~/.local/share/memex-claude/`.
+2. Surface `memex doctor`-style suggestion to migrate.
+3. No auto-rename — the user runs `memex doctor --migrate-repo` from either harness.
+
+This keeps the migration **opt-in, non-destructive, and consistent across harnesses**.
+
+## Coexistence with memex-claude on grok
+
+grok reads `~/.claude/plugins/` for compatibility. A user with memex-claude already installed
+in Claude will have it visible to grok as well — verified in the probe (`grok inspect --json`
+showed `memex-claude` enabled). With both memex-claude and memex-grok installed in grok, hooks
+would double-fire and both would race to read/write the same telemetry and cache files.
+
+**Resolution:**
+
+memex-claude grows a grok-detection guard at the top of its entrypoint. If `GROK_HOOK_EVENT` is
+present in the process environment (only set by grok's hook runner), memex-claude exits 0
+immediately with a stderr line: `memex-claude: deferring to memex-grok on this harness`. This is
+a one-line change to memex-claude, shipped as a patch release coordinated with memex-grok v0.1.0.
+
+memex-grok takes no reciprocal action — if a user is running memex-grok on Claude Code (which
+would require setting `CLAUDE_HOOK_*` env vars), that is unsupported and outside the design.
+
+The `memex doctor` command in both harnesses reports whether the other is installed and whether
+the deferral is active.
 
 ## Future-readiness
 
-When grok ships `additionalContext` support:
+When grok ships hook-driven context injection (whatever the wire format):
 
-1. User sets `config.hooks.UserPromptSubmit.injectAdditionalContext: true`.
-2. Existing handler emits `{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit",
-   "additionalContext":"…"}}` — same payload memex-claude emits today.
-3. MCP tool remains valuable for deliberate deeper search.
-4. Zero code changes required.
+1. The `wireFormat` config option grows a new value (e.g. `"grok_native_v1"`).
+2. A new serializer is added to `src/hooks/injection-serializers.ts` — typically a 10-20 line
+   function that takes the matches and returns the payload string.
+3. User sets `config.hooks.UserPromptSubmit.injectAdditionalContext: true` and (if not the
+   default) `wireFormat: "grok_native_v1"`.
+4. The MCP tool remains valuable as the deliberate deeper-search complement.
+
+The match-computation code path is fully reused. Only the serialization layer changes — bounded
+to one file. This is the precise scope of "future-readiness" the design guarantees.
+
+**What is NOT guaranteed:** that grok will adopt Claude's `hookSpecificOutput.additionalContext`
+wire format verbatim. The probe already showed grok diverges from Claude on input keys (snake
+vs PascalCase enum values, camelCase field names). Output divergence is plausible.
 
 When grok ships PreToolUse output (tool-guidance):
 
 1. Add `case "pre_tool_use"` to the hook dispatcher.
 2. Reuse memex-core's existing PreToolUse handler.
 
-When grok ships PreCompact hooks (already in event list but semantics may evolve):
+When grok ships Stop or PreCompact hooks that fire from plugin scope:
 
-1. Add `case "pre_compact"` mirroring memex-claude's handler.
+1. Activate the dormant handlers (already wired) via config flags.
 
 ## Out of scope (v1)
 
@@ -388,48 +519,67 @@ When grok ships PreCompact hooks (already in event list but semantics may evolve
 - **Cross-harness session-continuity handoff** — handoff format may diverge initially.
 - **Auto-rewriting AGENTS.md from rule matches** — too invasive for v1.
 
-## Known implementation risks
+## Implementation prerequisites (must pass before coding starts)
 
-### Plugin hooks may not fire reliably
+These items must be validated against a live grok session before implementation begins.
+Failures here change the design, not just the implementation.
 
-In headless probe testing (`grok -p "…"`), a plugin's `hooks/hooks.json` was correctly
-recognized by `grok inspect` but its hook scripts never executed. The identical script
-installed at `~/.grok/hooks/` (global scope) fired normally.
+### P1. MCP-server-from-plugin loading works
 
-This could be a headless-mode quirk, a missing trust step, or a version-specific bug.
-Implementation must validate plugin-hook firing in an interactive TTY session before declaring
-the SessionStart wiring functional. If plugin hooks turn out to be unreliable, the fallback
-is to ship an installer (or `memex doctor --install-hooks`) that symlinks `hooks/hooks.json`
-into `~/.grok/hooks/memex-grok.json` as a global hook. The MCP server path is unaffected
-either way — MCP servers from `.mcp.json` are loaded by a separate mechanism.
+Install a trivial probe plugin with a `.mcp.json` declaring a stdio server with one
+`probe_echo` tool. In an interactive grok session, confirm:
+- `grok inspect --json` lists the server under `mcpServers`
+- Asking the model to "call probe_echo with message 'hi'" succeeds and returns the echo
+- The server process is spawned exactly once per session
 
-### `CLAUDE_PLUGIN_ROOT` expansion in plugin hooks
+**If this fails:** the design pivots to a user-installed MCP via `~/.grok/.mcp.json` or
+`grok mcp add` invoked by the installer. The plugin still ships the `.mcp.json` as a fallback.
 
-The hooks documentation claims grok injects both `CLAUDE_PLUGIN_ROOT` and `GROK_PLUGIN_ROOT`
-for plugin-sourced hooks. We could not confirm this in testing because plugin hooks did not
-fire. The implementation must verify the variable expands correctly; if only
-`GROK_PLUGIN_ROOT` is reliable, switch `hooks/hooks.json` to use it (or write both forms via
-a fallback script).
+### P2. Plugin hook firing in interactive TTY
 
-## Open implementation questions (deferred to plan)
+The headless probe showed plugin hooks did not fire. Re-test in an interactive grok session
+(real TTY). If hooks fire interactively but not headlessly, the SessionStart hook remains
+best-effort and the MCP first-call path is the actual workhorse (already specified). If hooks
+fire in neither mode, the doctor command must offer to install `~/.grok/hooks/memex-grok.json`
+as a global-scope symlink fallback.
+
+### P3. `CLAUDE_PLUGIN_ROOT` / `GROK_PLUGIN_ROOT` expansion in plugin hooks
+
+Once P2 establishes hooks fire, confirm which variables expand. If only `GROK_PLUGIN_ROOT`
+works, switch `hooks/hooks.json` to use it (build script can substitute).
+
+### P4. Canonical project-id algorithm in memex-core
+
+`canonicalProjectId()` defined, tested, and released in memex-core. memex-claude updated to
+use it (with migration). Without this, memex-grok ships in read-only-sync mode only.
+
+### P5. Coexistence guard in memex-claude
+
+memex-claude patched to exit 0 when `GROK_HOOK_EVENT` is set in its environment.
+
+## Open implementation questions (resolved in plan)
 
 1. MCP SDK choice: official `@modelcontextprotocol/sdk` vs lighter hand-rolled JSON-RPC. The
    official SDK pulls heavy deps; we may bundle our own slim implementation for binary-size
    reasons (consistent with memex-claude's footprint).
-2. Platform binary download: same pattern as memex-claude (post-install script in
-   `hooks/post-install.sh`, or lazy first-run download)?
-3. Whether to ship a `/memex:search` slash command as a thin wrapper around the MCP tool for
+2. Whether to ship a `/memex:search` slash command as a thin wrapper around the MCP tool for
    discoverability, or rely on auto-invocation.
 
 ## Success criteria
 
-- `grok plugin install jim80net/memex-grok` installs and registers the MCP server + hooks.
+- `grok plugin install jim80net/memex-grok --trust` installs the plugin and registers the MCP
+  server (and hooks, to whatever degree grok supports plugin hooks).
 - In a grok session inside a project with skills in `~/.grok/skills/`, asking a question that
-  matches a skill description causes the model to invoke `memex_search`, get back the skill, and
-  reference it in its response — without any human intervention beyond the question.
+  matches a skill description causes the model to invoke `memex_search`, get back the skill,
+  and reference it in its response — without any human intervention beyond the question.
 - A sync repo populated by memex-claude is consumed identically by memex-grok (same skills,
-  rules, memories surface on both).
-- The day grok ships `additionalContext` support, one config flip enables auto-injection with no
-  code release required.
-- `memex doctor` correctly reports MCP registration status, hook trust, and `additionalContext`
-  support detection.
+  rules, memories surface on both) after both harnesses have adopted the shared
+  `canonicalProjectId` algorithm.
+- Installing both memex-claude and memex-grok on grok does not double-fire hooks (memex-claude
+  detects grok env and defers).
+- The day grok ships hook-driven context injection (whatever wire format), enabling
+  auto-injection is a one-file serializer addition plus a config flip, with no architectural
+  refactor.
+- `memex doctor` reports: MCP registration status, hook firing behavior, `CLAUDE_PLUGIN_ROOT`
+  expansion status, sync repo location, canonical-id migration state, and coexistence-deferral
+  status.
