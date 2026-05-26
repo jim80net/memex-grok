@@ -431,7 +431,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Write `.gitignore`**
+- [ ] **Step 4: Write `.gitignore`** (extends the bootstrap `.worktrees/` entry already in place)
 
 ```
 node_modules/
@@ -441,6 +441,7 @@ dist/
 .env.*
 .claude/settings.local.json
 tmp/
+.worktrees/
 
 # Prebuilt binary (downloaded by bin/install.sh, not checked in)
 bin/memex.bin
