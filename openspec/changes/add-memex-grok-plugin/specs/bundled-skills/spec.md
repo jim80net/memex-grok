@@ -54,19 +54,32 @@ The `doctor` skill SHALL be a thin wrapper that invokes the `memex doctor` CLI a
 - **WHEN** the user invokes the `doctor` skill
 - **THEN** the skill runs `memex doctor` and displays its output verbatim
 
-### Requirement: Handoff and takeover use grok session format
+### Requirement: Handoff and takeover persist to the sync repo
 
-The `handoff` skill SHALL produce a continuation plan document at `~/.grok/memory/<slug>/handoffs/<timestamp>.md` (under grok's convention, read-only-elsewhere notwithstanding — handoffs are an exception because they are explicitly user-output). The `takeover` skill SHALL locate the most recent handoff under that path, read it, and present the plan for the user to execute.
+The `handoff` skill SHALL produce a continuation plan document at `<sync-repo>/projects/<canonical-id>/handoffs/<ISO-timestamp>.md` (or `~/.grok/memex/projects/<grok-local-id>/handoffs/<ISO-timestamp>.md` in read-only-sync mode). The `takeover` skill SHALL locate the most recent handoff under that path, read it, and present the plan for the user to execute. Writing to the sync repo means handoffs created in one harness can be picked up in another, preserving cross-harness session continuity.
 
-#### Scenario: Handoff writes to handoffs/ subdir
+#### Scenario: Handoff writes to sync repo when writable
 
+- **GIVEN** sync is enabled and the marker indicates a post-migration schema
 - **WHEN** the user invokes `handoff` at the end of a session
-- **THEN** a new file is written under `~/.grok/memory/<slug>/handoffs/<ISO-timestamp>.md` containing the continuation plan; no other grok-owned files are modified
+- **THEN** a new file is written at `<sync-repo>/projects/<canonical-id>/handoffs/<ISO-timestamp>.md` containing the continuation plan; no files under `~/.grok/memory/` are modified
+
+#### Scenario: Handoff falls back to grok-local when read-only-sync
+
+- **GIVEN** sync is enabled but the marker indicates read-only-sync mode
+- **WHEN** the user invokes `handoff`
+- **THEN** the file is written at `~/.grok/memex/projects/<grok-local-id>/handoffs/<ISO-timestamp>.md`; no files under `~/.grok/memory/` are modified
 
 #### Scenario: Takeover reads the latest handoff
 
 - **WHEN** the user invokes `takeover` at the start of a new session
-- **THEN** the skill finds the most recent handoff under `~/.grok/memory/<slug>/handoffs/`, presents its content, and prompts the user to proceed
+- **THEN** the skill searches both `<sync-repo>/projects/<canonical-id>/handoffs/` (if accessible) and `~/.grok/memex/projects/<grok-local-id>/handoffs/`, picks the most recent timestamp across both, presents its content, and prompts the user to proceed
+
+#### Scenario: Cross-harness handoff is readable from grok
+
+- **GIVEN** memex-claude wrote a handoff at `<sync-repo>/projects/<canonical-id>/handoffs/2026-05-25T12:00:00Z.md` during a Claude session
+- **WHEN** the user opens a grok session in the same project and invokes `takeover`
+- **THEN** the same handoff file is found, read, and presented
 
 ### Requirement: Help skill documents MCP tools
 

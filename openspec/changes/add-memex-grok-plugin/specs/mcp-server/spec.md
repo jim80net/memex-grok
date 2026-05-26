@@ -14,6 +14,28 @@ The `memex mcp` subcommand SHALL implement an MCP stdio server: it reads JSON-RP
 - **WHEN** the client sends `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
 - **THEN** the response contains exactly three tools by name: `memex_search`, `memex_read_skill`, `memex_status`
 
+### Requirement: Server lifecycle
+
+The MCP server SHALL be spawned exactly once per grok session by the MCP loader, remain alive for the duration of the session, perform first-call initialization at most once, and exit cleanly on stdin EOF. The server SHALL NOT spawn child processes for tool calls; all tool calls SHALL be handled in the original process.
+
+#### Scenario: Single process for the session
+
+- **GIVEN** the MCP server starts at session begin
+- **WHEN** the model issues five successive tool calls
+- **THEN** the same process serves all five (verifiable by stable PID in stderr diagnostic lines), and no fork/spawn occurs per call
+
+#### Scenario: EOF triggers clean shutdown
+
+- **GIVEN** the MCP server is running
+- **WHEN** stdin reaches EOF (grok closes the channel at session end)
+- **THEN** the server flushes any pending stderr, completes any in-flight tool call, and exits 0 within 1 second
+
+#### Scenario: Init runs at most once per process
+
+- **GIVEN** first-call init has already run for the current process
+- **WHEN** a subsequent tool call arrives
+- **THEN** the init logic is skipped (no `git pull`, no full index rebuild) — only incremental cache freshness checks run
+
 ### Requirement: Tool surface
 
 The MCP server SHALL expose exactly three tools to the model — `memex_search`, `memex_read_skill`, and `memex_status` — with the following contracts. No `memex_record_match` tool SHALL be exposed; telemetry is recorded implicitly per the "Telemetry threading" requirement.
@@ -32,6 +54,23 @@ The MCP server SHALL expose exactly three tools to the model — `memex_search`,
 
 - **WHEN** the client calls `memex_status`
 - **THEN** the response includes `index_size`, `source_counts` (by type), `last_sync_at` (ISO-8601 or null), `sync_enabled` (boolean), `embedding_model` (string)
+
+#### Scenario: memex_search returns empty results on empty corpus
+
+- **GIVEN** the SkillIndex has zero indexed entries
+- **WHEN** the client calls `memex_search` with any non-empty query
+- **THEN** the response is `{ query_id: <opaque string>, results: [] }` — this is success, not an error
+
+#### Scenario: memex_search returns empty results when no match clears threshold
+
+- **GIVEN** the SkillIndex has entries but none score above the requested `threshold`
+- **WHEN** `memex_search` is called
+- **THEN** the response is `{ query_id: <opaque string>, results: [] }` — no error, no partial-result heuristic
+
+#### Scenario: memex_search rejects empty query
+
+- **WHEN** the client calls `memex_search` with `{ query: "" }` or whitespace-only
+- **THEN** the server returns a JSON-RPC error with `code: -32602` (invalid params) and `message: "query must be non-empty"`
 
 ### Requirement: Telemetry threading via query_id
 

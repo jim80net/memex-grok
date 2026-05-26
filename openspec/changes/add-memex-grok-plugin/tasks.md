@@ -2,15 +2,17 @@
 
 ## 0. Prerequisites — must pass before any feature code
 
-- [ ] 0.1 Validate P1: install a trivial probe plugin with `.mcp.json` declaring a `probe_echo` stdio MCP server; in an interactive grok session, confirm `grok inspect --json` lists it under `mcpServers` and the model can call it. If this fails, branch to fallback design (user-installed MCP via `~/.grok/.mcp.json`).
-- [ ] 0.2 Validate P2: re-run the headless plugin-hook probe in an interactive TTY session. Document whether plugin hooks fire interactively. If they fire in neither mode, `memex doctor --install-hooks` will fall back to symlinking into `~/.grok/hooks/`.
-- [ ] 0.3 Validate P3: once hooks fire (P2), confirm `${CLAUDE_PLUGIN_ROOT}` expands inside plugin hook scripts. If only `${GROK_PLUGIN_ROOT}` works, configure the build to substitute.
-- [ ] 0.4 Track P4 (memex-core `canonicalProjectId`) in a coordinated change request against `jim80net/memex-core`; tag this change as blocked-on until it ships.
-- [ ] 0.5 Track P5 (memex-claude `GROK_HOOK_EVENT` guard) in a coordinated change request against `jim80net/memex-claude`; tag this change as blocked-on until it ships.
+Each prerequisite produces a deliverable document under `docs/superpowers/prereqs/`. The implementation cannot move past §0 until every prereq doc records a pass (or a documented design-pivot).
+
+- [ ] 0.1 **Validate P1 (MCP-from-plugin)**. Procedure: create `tmp/probe-mcp-plugin/` with `.claude-plugin/plugin.json`, `.mcp.json` declaring stdio command `bash tmp/probe-mcp-plugin/bin/echo-server.sh`, and an `echo-server.sh` that implements MCP `initialize`, `tools/list` (one `probe_echo` tool), `tools/call`. Install via `grok plugin install ./tmp/probe-mcp-plugin --trust`. In an interactive (TTY) grok session, run `grok inspect --json` and confirm `mcpServers` contains `probe-echo`. Then ask the model: "Call `probe_echo` with `{message: 'PASS_MARKER_7q2'}`". Confirm response contains `PASS_MARKER_7q2`. Acceptance: a written report at `docs/superpowers/prereqs/P1-mcp-from-plugin.md` with the inspect JSON snippet and the model's response, ending in `RESULT: PASS` or `RESULT: FAIL — pivoting to <design alternative>`.
+- [ ] 0.2 **Validate P2 (plugin hooks in TTY)**. Procedure: re-create `tmp/probe-hooks-plugin/` with a hook script that writes `(event, env, stdin)` to `/tmp/p2-probe.log`. Install via `grok plugin install ./tmp/probe-hooks-plugin --trust`. Open `grok` interactively (full TTY), send one prompt, exit. Inspect `/tmp/p2-probe.log` for `session_start`, `user_prompt_submit`, and `stop` entries. Repeat headless via `grok -p "..."` for comparison. Acceptance: report at `docs/superpowers/prereqs/P2-plugin-hook-firing.md` covering both modes, ending in `RESULT: TTY-only | both | neither`.
+- [ ] 0.3 **Validate P3 (`${CLAUDE_PLUGIN_ROOT}` expansion)**. Procedure: only meaningful if P2 reports `TTY-only` or `both`. Modify the P2 probe to log `CLAUDE_PLUGIN_ROOT` and `GROK_PLUGIN_ROOT` env values; re-run. Acceptance: report at `docs/superpowers/prereqs/P3-plugin-env-vars.md` noting which variable expands; if only `GROK_PLUGIN_ROOT`, list every `${CLAUDE_PLUGIN_ROOT}` reference in `hooks/hooks.json` and `.mcp.json` that the build must substitute.
+- [ ] 0.4 **Track P4 (memex-core `canonicalProjectId`)** — coordinated change tracked at `https://github.com/jim80net/memex-core/issues/<TBD>`. This change is **blocked-on** P4 for tasks §1.1 (version pin), §2.3 (memory-mapping module), §3.x and §4.x (which depend on the pinned core). Update §1.1's pin once memex-core ships.
+- [ ] 0.5 **Track P5 (memex-claude `GROK_HOOK_EVENT` guard)** — coordinated change tracked at `https://github.com/jim80net/memex-claude/issues/<TBD>`. Blocks task §9.3 (coexistence test). When shipped, record the guard-introduction version in memex-core's exported constant (`GUARD_INTRODUCED_VERSION`) and add a note here.
 
 ## 1. Repo bootstrap
 
-- [ ] 1.1 Create `package.json`, `tsconfig.json`, `build.ts`, `.npmrc`, `.gitignore` following memex-claude's layout. Pin `@jim80net/memex-core` to a version that has `canonicalProjectId`.
+- [ ] 1.1 Create `package.json`, `tsconfig.json`, `build.ts`, `.npmrc`, `.gitignore` following memex-claude's layout. Pin `@jim80net/memex-core >= <CANONICAL_PID_VERSION>` (the version that ships `canonicalProjectId`, `.memex-sync/version.json` constants, and `GUARD_INTRODUCED_VERSION`). **Blocked-on §0.4 (P4)**.
 - [ ] 1.2 Create `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 - [ ] 1.3 Create empty `bin/memex` and `bin/memex.cmd` stubs (real implementation in §5).
 

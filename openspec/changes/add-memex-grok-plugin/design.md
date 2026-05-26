@@ -32,19 +32,19 @@ memex-claude is loaded by grok via `~/.claude/plugins/` for Claude-compat (verif
 
 ### D5. Read-only-sync mode until canonical-id migration is done
 
-memex-claude derives sync-repo project IDs from `encodeProjectPath(cwd)`. grok derives workspace IDs from `<slug>-<hash8>` of the git remote URL. These differ for the same project, so a naive port would silently fragment the corpus. Until `canonicalProjectId()` ships in memex-core and memex-claude completes its project-id migration, memex-grok writes only to grok-local paths. Reads from the sync repo are best-effort with a case-insensitive probe falling back to legacy IDs.
+**Why**: memex-claude derives sync-repo project IDs from `encodeProjectPath(cwd)`; grok would naturally derive from git remote slug+hash. These produce different IDs for the same project. Writing under different IDs silently fragments the corpus. Coordinating both harnesses on the canonical algorithm in memex-core, and shipping the algorithm before memex-grok's first write, is the only way to avoid this trap.
 
 **Affects**: `cross-harness-integration` spec — see "Read-only-sync mode" requirement.
 
 ### D6. Sync repo path safety prevents silent divide
 
-memex-claude uses `~/.local/share/memex-claude/`. memex-grok prefers `~/.local/share/memex/`. If a user installs memex-grok before updating memex-claude, divergent writes accumulate in two unmerged repos. memex-grok mitigates by refusing to create the new path while the old one exists and is non-empty — it points its sync at the old path and logs a one-line migration suggestion. `memex doctor --migrate-repo` performs the rename interactively and leaves a symlink at the old path for backward compatibility.
+**Why**: A user who installs memex-grok before updating memex-claude would accumulate divergent writes in `~/.local/share/memex-claude/` and `~/.local/share/memex/`. The two repos are not auto-merged later. Preferring the existing `memex-claude/` path on first run keeps everything in one place until the user opts in to the rename via `memex doctor --migrate-repo`.
 
 **Affects**: `cross-harness-integration` spec — see "Sync repo path policy" and "Migration command" requirements.
 
 ### D7. Bin stub instead of post-install script
 
-memex-claude has wrestled with cross-platform install-script issues. memex-grok ships a tiny POSIX shell stub at `bin/memex` (and `bin/memex.cmd` for Windows) that downloads + sha256-verifies the platform binary on first invocation and caches it under `~/.cache/memex-grok/<version>/<platform>/`. The plugin install path is purely declarative — `grok plugin install` does no special work.
+**Why**: memex-claude's cross-platform install scripts have been a maintenance burden (Windows quoting, sudo paths, npm vs pnpm vs bun differences). A POSIX shell stub committed to the repo, doing lazy download + sha256 verify on first invocation, makes `grok plugin install` purely declarative and shifts platform-dispatch logic into one small, testable script.
 
 **Affects**: `cross-harness-integration` spec — see "Binary distribution" requirement.
 

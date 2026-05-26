@@ -45,8 +45,8 @@ P1 and P2 are validated in an exploratory subtask before any feature code. P3 fo
 
 - **Affected code (new repo)**: `src/main.ts`, `src/mcp/{server,tools}.ts`, `src/hooks/{session-start,user-prompt,stop,pre-compact,input,injection-serializers}.ts`, `src/cli/{sync,doctor,index-cmd}.ts`, `src/core/{config,paths,memory-mapping}.ts`, `build.ts`, plus 7 skill directories and the three plugin manifest files.
 - **Affected on-disk state**: `~/.grok/memex.json` (config, optional), `~/.cache/memex-grok/` (binary download cache), `~/.local/share/memex/` (sync repo — shared with memex-claude post-migration).
-- **External dependencies (cross-repo)**:
-  - `memex-core`: must ship `canonicalProjectId()` (separate openspec change in that repo). Without it, memex-grok runs in read-only-sync mode.
-  - `memex-claude`: must ship a `GROK_HOOK_EVENT` guard and adopt `canonicalProjectId` with a one-shot migration (separate change in that repo).
+- **External dependencies (cross-repo)** — pinned by name; exact semver pinned in `package.json` once each upstream change ships:
+  - `@jim80net/memex-core`: must ship `canonicalProjectId(cwd, syncConfig)` and the `.memex-sync/version.json` schema-marker contract used by read-only-sync detection. Tracked as a separate openspec change in that repo. Until shipped: memex-grok cannot start coding §3+ tasks (see `tasks.md` §0.4). When shipped, `package.json` pins `@jim80net/memex-core >= <CANONICAL_PID_VERSION>` (placeholder to be filled by the time §1.1 runs).
+  - `memex-claude`: must ship a `GROK_HOOK_EVENT` guard (exits 0 when env var is set) and adopt `canonicalProjectId` with a one-shot project-id migration. Tracked as a separate openspec change in that repo. memex-grok's `doctor` command reads memex-claude's installed version and compares against a known-guard-version constant exported from `memex-core` (added as part of the memex-core change).
 - **No new runtime dependencies** beyond what memex-core/memex-claude already pull in.
 - **Documentation**: `README.md`, `CONTRIBUTING.md`, `USAGE.md` for the new repo. `memex-claude` README gets a cross-link.

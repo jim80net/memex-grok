@@ -43,6 +43,11 @@ The `memex hook` subcommand SHALL read the grok hook envelope from stdin, pass i
 - **WHEN** stdin contains a `user_prompt_submit` envelope and `config.hooks.UserPromptSubmit.enabled === false`
 - **THEN** the dispatcher exits 0 without running the handler
 
+#### Scenario: Unhandled events are no-ops
+
+- **WHEN** stdin contains a normalized event memex does not yet handle (`PostToolUse`, `Notification`, `SessionEnd`)
+- **THEN** the dispatcher writes a single stderr line `memex: <event> received, no handler registered (no-op)`, exits 0, and emits nothing on stdout
+
 ### Requirement: SessionStart hook is best-effort
 
 The SessionStart hook handler SHALL eagerly perform the same sync-pull and cache-invalidation work the MCP server would otherwise do on first call. The MCP server SHALL function correctly even if the hook never fires. Hook failure SHALL NOT prevent the MCP server from serving subsequent tool calls.
