@@ -48,3 +48,35 @@ describe("runMcpServer", () => {
     expect(parsed.result.tools.map((t: { name: string }) => t.name)).toEqual(["alpha", "beta"]);
   });
 });
+
+describe("runMcpServer error envelopes", () => {
+  it("returns -32601 for unknown tool", async () => {
+    const { stdin, stdout } = makeStreams();
+    const done = runMcpServer({ stdin, stdout, tools: [] });
+    stdin.write('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"nope","arguments":{}}}\n');
+    const out = await collectFor(50, stdout);
+    stdin.end();
+    await done;
+    const parsed = JSON.parse(out.trim().split("\n")[0]);
+    expect(parsed.error.code).toBe(-32601);
+    expect(parsed.error.message).toContain("nope");
+  });
+
+  it("returns -32603 when a tool handler throws", async () => {
+    const { stdin, stdout } = makeStreams();
+    const tools: ToolHandler[] = [{
+      name: "boom",
+      description: "throws",
+      inputSchema: { type: "object" },
+      call: async () => { throw new Error("kaboom"); },
+    }];
+    const done = runMcpServer({ stdin, stdout, tools });
+    stdin.write('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"boom","arguments":{}}}\n');
+    const out = await collectFor(50, stdout);
+    stdin.end();
+    await done;
+    const parsed = JSON.parse(out.trim().split("\n")[0]);
+    expect(parsed.error.code).toBe(-32603);
+    expect(parsed.error.message).toBe("kaboom");
+  });
+});
