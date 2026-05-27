@@ -2401,7 +2401,7 @@ main().then((code) => process.exit(code)).catch((err) => {
 });
 ```
 
-> The `doctor` import is added now even though `src/cli/doctor.ts` doesn't exist yet — Task 21 creates it. The test for `doctor` lives in Task 21's test file; for Task 15 we only assert version/unimplemented/usage paths, all of which don't import doctor.
+> The `doctor` import requires a stub `src/cli/doctor.ts` to keep typecheck green (TS can't see lazy `await import` paths without resolution). Task 15 ships a stub with `export async function runDoctor(args: string[]): Promise<number>` that writes "not yet implemented (Task 21)" to stderr and returns 1. Task 21 replaces the stub with the real implementation. The test for `doctor` lives in Task 21's test file; for Task 15 we only assert version/unimplemented/usage paths.
 
 - [ ] **Step 4: Run, verify pass**
 
