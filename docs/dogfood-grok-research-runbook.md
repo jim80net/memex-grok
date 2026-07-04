@@ -1,7 +1,17 @@
 # Dogfood runbook — memex-grok on the `grok-research` desk
 
-**Status:** ready; awaiting (a) CoS veto window and (b) a `grok-research`-idle
-window (coordinate with family-office — the desk serves research dispatches).
+> **🛑 BLOCKED (2026-07-04) on [#4](https://github.com/jim80net/memex-grok/issues/4).**
+> A 2026-07-04 dogfood attempt registered + handshook cleanly (`grok mcp doctor`
+> ✓ 3 tools, `memex doctor` exit 0) but a REAL `memex_search` **failed**: the
+> compiled binary can't load its embedding backend (`@huggingface/transformers`).
+> The steps below register + place the binary but are **insufficient** — every
+> real tool call errors until #4 lands. Rolled back. **Do not re-run until #4 is
+> fixed and a real `memex_search` returns corpus hits from the built binary.**
+> The step-4 "dogfood" verification must be a real search returning hits, not a
+> handshake.
+
+**Status:** BLOCKED on #4 (see banner). When unblocked: awaiting (a) CoS veto
+window and (b) a `grok-research`-idle window (coordinate with family-office).
 **Reversibility:** full — `grok mcp remove` + delete the copied binary. No
 operator facet (CoS's window suffices).
 
