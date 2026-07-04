@@ -1,19 +1,18 @@
 # Dogfood runbook — memex-grok on the `grok-research` desk
 
-> **🛑 BLOCKED (2026-07-04) on [#4](https://github.com/jim80net/memex-grok/issues/4).**
-> A 2026-07-04 dogfood attempt registered + handshook cleanly (`grok mcp doctor`
-> ✓ 3 tools, `memex doctor` exit 0) but a REAL `memex_search` **failed**: the
-> compiled binary can't load its embedding backend (`@huggingface/transformers`).
-> The steps below register + place the binary but are **insufficient** — every
-> real tool call errors until #4 lands. Rolled back. **Do not re-run until #4 is
-> fixed and a real `memex_search` returns corpus hits from the built binary.**
-> The step-4 "dogfood" verification must be a real search returning hits, not a
-> handshake.
+> **✅ UNBLOCKED (2026-07-04) — [#4](https://github.com/jim80net/memex-grok/issues/4)
+> fix verified.** The `5f7ac34` fix (static-import `CompiledLocalEmbeddingProvider`
+> so bun bundles transformers) was verified end-to-end: a REAL `memex_search`
+> against the freshly built binary returns corpus hits (3 hits, deploy-sim from a
+> clean install dir). The first dogfood attempt (rolled back) failed because the
+> binary couldn't load its embedding backend; that is fixed. The steps below are
+> **corrected** — they now copy the onnx `.so` and set `LD_LIBRARY_PATH` (the two
+> deploy details the earlier attempt and the test harness masked).
 
-**Status:** BLOCKED on #4 (see banner). When unblocked: awaiting (a) CoS veto
-window and (b) a `grok-research`-idle window (coordinate with family-office).
-**Reversibility:** full — `grok mcp remove` + delete the copied binary. No
-operator facet (CoS's window suffices).
+**Status:** READY. Awaiting a fresh `grok-research`-idle window + family-office
+re-confirm (per their "re-confirm before touching grok-research, only after a
+real search returns hits" — that bar is now met). **Reversibility:** full —
+`grok mcp remove memex-grok` + delete the install dir. No operator facet.
 
 ## What it does
 
@@ -30,28 +29,47 @@ shared corpus. This is the first live consumption of memex on a Grok harness.
   registered.
 - Rollback (`grok mcp remove`) tested to cleanly deregister.
 
-## Steps
+## Steps (corrected 2026-07-04 after the #4 fix)
+
+Two runtime deps the naive install misses — both required or `memex_search` fails:
+1. **`libonnxruntime.so.1` must sit in the install dir** (emitted next to the
+   binary by `pnpm build`; copy it too, not just the binary).
+2. **`LD_LIBRARY_PATH` must include the install dir** so the binary finds that
+   `.so` — pass it into the MCP registration via `-e` (the binary is not yet
+   self-locating; an `$ORIGIN` rpath would remove this — tracked follow-up).
 
 ```sh
 # 0. Confirm grok-research is idle (family-office) before touching its config.
+GROK_CWD=<grok-research cwd>        # e.g. the desk's worktree root
+INSTALL="$HOME/.cache/memex-grok"
 
-# 1. Build (on the host; ~arm64/x64 auto-detected) and install the binary.
+# 1. Build and install BOTH the binary AND the onnx shared lib.
 cd <memex-grok checkout>
 pnpm install --frozen-lockfile && pnpm build
-mkdir -p ~/.cache/memex-grok
-cp "dist/$(node -e 'console.log(process.platform+"-"+process.arch)')/memex" \
-   ~/.cache/memex-grok/memex-grok
-chmod +x ~/.cache/memex-grok/memex-grok
+mkdir -p "$INSTALL"
+PLAT="$(node -e 'console.log(process.platform+"-"+process.arch)')"
+cp "dist/$PLAT/memex" "$INSTALL/memex-grok"
+cp "dist/$PLAT/libonnxruntime.so.1" "$INSTALL/"     # REQUIRED — do not skip
+chmod +x "$INSTALL/memex-grok"
 
-# 2. Register the MCP server (user scope → available to the grok-research desk).
-grok mcp add memex-grok -s user ~/.cache/memex-grok/memex-grok mcp
+# 2. Register PROJECT-scope in grok-research's cwd (one-desk blast radius),
+#    with LD_LIBRARY_PATH so the embedding backend loads.
+cd "$GROK_CWD"
+grok mcp add memex-grok -s project -e LD_LIBRARY_PATH="$INSTALL" \
+  "$INSTALL/memex-grok" mcp
 
-# 3. Verify.
-grok mcp doctor          # expect: memex-grok ✓ handshake OK, ✓ 3 tools discovered
-~/.cache/memex-grok/memex-grok doctor   # expect: binary OK, mcp-registration OK
+# 3. Verify — handshake AND a real search (a discovered tool is not a working tool).
+grok mcp doctor                          # memex-grok ✓ handshake OK, ✓ 3 tools
+LD_LIBRARY_PATH="$INSTALL" "$INSTALL/memex-grok" doctor   # exit 0
+# real search must return hits (this is the acceptance bar, not the handshake):
+printf '%s\n%s\n%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"p","version":"0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memex_search","arguments":{"query":"standard development flow","threshold":0.3}}}' \
+  | LD_LIBRARY_PATH="$INSTALL" "$INSTALL/memex-grok" mcp   # expect results[] non-empty
 
-# 4. Dogfood: on grok-research's next research turn, confirm it can call
-#    memex_search and gets corpus hits (the live-consumption proof).
+# 4. Dogfood: after family-office rotates grok-research's session, confirm it
+#    calls memex_search and gets hits (the live-consumption proof).
 ```
 
 ## Rollback
