@@ -79,3 +79,67 @@ If TTY behavior diverges from headless (extremely unlikely), the design pivot wo
 - **No pivot needed.** The MCP-server-first architecture works as designed.
 - **Tool naming**: memex-grok's `memex_search`, `memex_read_skill`, `memex_status` will be exposed to the model as `memex__memex_search`, `memex__memex_read_skill`, `memex__memex_status`. The tool descriptions should explain this to the model (or use the unprefixed names in description text — the model will resolve correctly).
 - **Permission prompt**: first tool call in a fresh session asks the user to approve. This is a one-time UX cost per session, equivalent to grok's built-in tool approval.
+
+---
+
+## Re-validation 2026-07-04 (grok 0.2.82, native `grok mcp add` path)
+
+Re-run during doctor (Task 7.1) implementation, on grok **0.2.82** (the 05-26
+PASS was on 0.1.219). Two goals: (a) confirm the MCP subsystem still loads a
+memex server, (b) validate the **native `grok mcp add`** fallback that line 75
+named — the mechanism `memex doctor --install-mcp` will use.
+
+### Native registration + handshake — PASS
+
+`grok` now ships first-class MCP registration (`grok mcp add|list|remove|doctor`,
+scopes `user` → `~/.grok/config.toml` / `project` → `./.grok/config.toml`).
+Registered the **built binary** in an isolated project scope (temp dir, user
+config untouched) and ran `grok mcp doctor`:
+
+```
+memex-grok (stdio: dist/linux-arm64/memex mcp)
+  ✓ command found
+  ✓ server started (0.0s)
+  ✓ handshake OK (protocol 2024-11-05)
+  ✓ 3 tools discovered          # memex_search, memex_read_skill, memex_status
+Found 1 healthy, 0 failing.
+```
+
+Manual `initialize` also confirmed:
+`{"result":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}},"serverInfo":{"name":"memex","version":"0.1.0-alpha.0"}}}`.
+
+**No pivot** — plugin `.mcp.json` remains the primary distribution mechanism
+(PASS above); `grok mcp add` is the validated per-desk/per-project fallback for
+`memex doctor --install-mcp` (Task 7.x).
+
+### FINDING A (blocker for from-source launch): `--experimental-strip-types` fatals on TS parameter properties
+
+Launching from source — `node --experimental-strip-types src/main.ts mcp` —
+**fatals at startup**:
+
+```
+memex: fatal: TypeScript parameter property is not supported in strip-only mode
+```
+
+Node's strip-only mode *erases* types but cannot *transform* code, so a
+constructor parameter-property (`constructor(private foo: Foo)`) somewhere in
+the loaded module graph (memex-grok or transitive `@jim80net/memex-core`) kills
+the process during `initialize` — which is exactly the "handshake failed:
+connection closed" grok reports for a from-source registration. **Vitest
+(esbuild transform) handles parameter properties, so the unit suite is green
+while the subprocess launch path dies** — a tests-pass-≠-it-runs gap.
+
+Production impact: **none for the shipped mechanism** — `.mcp.json` / `grok mcp
+add` point at the **bundled binary** (`bun build --compile`, which compiles
+parameter properties away; handshake PASS above). But any from-source launch
+path is broken. Tracked as tech debt (see FINDING A note in
+`src/cli/doctor.ts` follow-ups / issue). Two durable fixes: purge parameter
+properties from the src + core hot path, OR assert "bundled-binary-only launch"
+and never document `node src/main.ts` as a runnable entry.
+
+### FINDING B (fixed this session): doctor `binaryRuns` used `version` not `--version`
+
+The binary's liveness command is `--version` (`src/main.ts:24`); `version`
+(no dashes) is an unknown subcommand that exits non-zero. The Task 7.1
+`binaryRuns` probe originally shelled `["version"]` → would have falsely
+reported a healthy binary as "present but not runnable." Fixed to `["--version"]`.

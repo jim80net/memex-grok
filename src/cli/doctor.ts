@@ -81,7 +81,7 @@ export async function runDoctor(args: string[]): Promise<number> {
 export interface DoctorProbes {
   /** Absolute path of the installed memex-grok binary, or null if none. */
   findBinary: (paths: GrokPaths) => string | null;
-  /** `<binary> version` → true if it runs and exits 0. */
+  /** `<binary> --version` → true if it runs and exits 0. */
   binaryRuns: (binaryPath: string) => Promise<boolean>;
   /** grok's registered MCP server ids, or null if the grok CLI is not
    *  installed / not inspectable on this host. */
@@ -99,7 +99,9 @@ const defaultProbes: DoctorProbes = {
   },
   async binaryRuns(binaryPath) {
     try {
-      await execFileAsync(binaryPath, ["version"], { timeout: 10_000 });
+      // `--version` is the binary's liveness command (src/main.ts); `version`
+      // (no dashes) is an unknown subcommand that exits non-zero.
+      await execFileAsync(binaryPath, ["--version"], { timeout: 10_000 });
       return true;
     } catch {
       return false;
