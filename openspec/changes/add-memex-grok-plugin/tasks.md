@@ -50,7 +50,7 @@ Each prerequisite produces a deliverable document under `docs/superpowers/prereq
 
 ## 7. CLI commands (cross-harness-integration spec)
 
-- [ ] 7.1 Implement `src/cli/doctor.ts` — checks: binary present and runnable, MCP registration (`grok inspect --json`), hook registration, sync repo location, canonical-id migration state, memex-claude coexistence-deferral state. Tests for each check first (cross-harness-integration spec → "Doctor command reports installation health").
+- [x] 7.1 Implement `src/cli/doctor.ts` — checks: binary present and runnable, MCP registration (`grok mcp list --json` / `grok inspect --json`), hook registration (reported dormant-by-design per D1/D3), sync repo location, canonical-id migration state, memex-claude coexistence-deferral state. Tests for each check first (cross-harness-integration spec → "Doctor command reports installation health"). Injectable `DoctorProbes` keep checks unit-testable; severity→exit = OK/WARN→0, any FAIL→1; `--json` flag.
 - [ ] 7.2 Implement `src/cli/doctor.ts --migrate-repo` — interactive rename of `~/.local/share/memex-claude/` to `~/.local/share/memex/` with backward-compat symlink (cross-harness-integration spec → "Migration command renames sync repo safely").
 - [ ] 7.3 Implement `src/cli/doctor.ts --install-hooks` — symlinks `hooks/hooks.json` into `~/.grok/hooks/memex-grok.json` as a global-scope fallback when plugin hooks don't fire (gated by `--force` if plugin hooks already fire).
 - [ ] 7.4 Implement `src/cli/sync.ts` — one-shot `memex sync` for manual pull/push.
