@@ -1,22 +1,29 @@
-// Launch-path smoke test — spawns the BUILT binary and drives a real MCP
-// `initialize` handshake over stdio. This is the guard for issue #3: the unit
-// suite transforms via esbuild (which handles TS parameter properties), so it
-// stays green even when the actual `node --experimental-strip-types` / bundled
-// launch path is broken. Only a test against the shipped artifact catches a
-// server that can't complete `initialize`.
+// Launch-path integration tests — spawn the BUILT binary and drive real MCP
+// stdio. Issue #3 guard: initialize handshake. Issue #4 guard: a real
+// `memex_search` tools/call against the compiled embedding backend (not just
+// tools/list discovery).
 //
 // Gated on the binary existing: `pnpm test` without a prior build skips (no
 // false failure locally); CI builds first (see .github/workflows/ci.yml), so
 // the assertion runs for real. A broken build fails loudly in the build step.
 
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { arch, platform } from "node:os";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-const BIN = join(process.cwd(), "dist", `${platform()}-${arch()}`, "memex");
+const DIST_DIR = join(process.cwd(), "dist", `${platform()}-${arch()}`);
+const BIN = join(DIST_DIR, "memex");
 const built = existsSync(BIN);
+const SKILL_FIXTURE = join(process.cwd(), "test", "fixtures", "skills", "launch-path-smoke");
+
+const tempHomes: string[] = [];
+afterEach(() => {
+  for (const home of tempHomes.splice(0)) {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
 
 const INITIALIZE = {
   jsonrpc: "2.0",
@@ -29,45 +36,88 @@ const INITIALIZE = {
   },
 };
 
-/** Spawn `<BIN> mcp`, send one initialize request, resolve the first JSON-RPC
- *  response line (or reject on exit-before-response / timeout). */
-function initializeHandshake(timeoutMs = 20_000): Promise<Record<string, unknown>> {
+function spawnMcp(env: NodeJS.ProcessEnv = process.env): ChildProcessWithoutNullStreams {
+  return spawn(BIN, ["mcp"], {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, ...env, LD_LIBRARY_PATH: [DIST_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") },
+  });
+}
+
+/** Read JSON-RPC response lines until `id` matches or reject on timeout/exit. */
+function readResponses(
+  child: ChildProcessWithoutNullStreams,
+  opts: { wantId?: number; timeoutMs?: number } = {},
+): Promise<{ responses: Record<string, unknown>[]; stderr: string }> {
+  const { wantId, timeoutMs = 20_000 } = opts;
   return new Promise((resolve, reject) => {
-    const child = spawn(BIN, ["mcp"], { stdio: ["pipe", "pipe", "pipe"] });
-    let out = "";
+    let buf = "";
     let err = "";
+    const responses: Record<string, unknown>[] = [];
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      reject(new Error(`no initialize response within ${timeoutMs}ms; stderr: ${err}`));
+      reject(new Error(`timed out after ${timeoutMs}ms; stderr: ${err}; stdout: ${buf}`));
     }, timeoutMs);
 
-    child.stdout.on("data", (d) => {
-      out += d.toString();
-      const nl = out.indexOf("\n");
-      if (nl !== -1) {
+    const maybeDone = () => {
+      if (wantId !== undefined && responses.some((r) => r.id === wantId)) {
         clearTimeout(timer);
         child.kill("SIGKILL");
+        resolve({ responses, stderr: err });
+      }
+    };
+
+    child.stdout.on("data", (d) => {
+      buf += d.toString();
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) !== -1) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
         try {
-          resolve(JSON.parse(out.slice(0, nl)));
+          responses.push(JSON.parse(line) as Record<string, unknown>);
         } catch (e) {
-          reject(new Error(`unparseable response: ${out.slice(0, nl)} (${String(e)})`));
+          clearTimeout(timer);
+          child.kill("SIGKILL");
+          reject(new Error(`unparseable line: ${line} (${String(e)})`));
+          return;
         }
+        maybeDone();
       }
     });
     child.stderr.on("data", (d) => (err += d.toString()));
     child.on("exit", (code) => {
-      if (out.indexOf("\n") === -1) {
+      if (wantId !== undefined && !responses.some((r) => r.id === wantId)) {
         clearTimeout(timer);
-        reject(new Error(`server exited (code ${code}) before responding; stderr: ${err.trim()}`));
+        reject(new Error(`server exited (code ${code}) before id=${wantId}; stderr: ${err.trim()}; stdout: ${buf}`));
       }
     });
-    child.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
   });
+}
+
+/** Spawn `<BIN> mcp`, send one initialize request, resolve the first JSON-RPC
+ *  response line (or reject on exit-before-response / timeout). */
+async function initializeHandshake(timeoutMs = 20_000): Promise<Record<string, unknown>> {
+  const child = spawnMcp();
+  const pending = readResponses(child, { wantId: 1, timeoutMs });
+  child.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
+  const { responses } = await pending;
+  return responses.find((r) => r.id === 1) ?? responses[0];
+}
+
+function isolatedHome(skillDirs: string[]): string {
+  const home = mkdtempSync(join(tmpdir(), "memex-grok-launch-"));
+  tempHomes.push(home);
+  mkdirSync(join(home, ".grok", "cache", "models"), { recursive: true });
+  writeFileSync(
+    join(home, ".grok", "memex.json"),
+    JSON.stringify({ skillDirs }),
+  );
+  return home;
 }
 
 // Skips locally when unbuilt (CI builds first, so it always runs there). The
 // describe name carries the reason so a skipped line is self-explanatory.
-describe.skipIf(!built)("built binary launch path (issue #3 guard — run `pnpm build` first)", () => {
+describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm build` first)", () => {
   it("completes the MCP initialize handshake as a spawned process", async () => {
     const resp = (await initializeHandshake()) as {
       result?: { protocolVersion?: string; serverInfo?: { name?: string } };
@@ -77,4 +127,38 @@ describe.skipIf(!built)("built binary launch path (issue #3 guard — run `pnpm 
     expect(resp.result?.protocolVersion).toBe("2024-11-05");
     expect(resp.result?.serverInfo?.name).toBe("memex");
   });
+
+  it("memex_search returns real corpus hits via the compiled embedding backend (issue #4)", async () => {
+    const home = isolatedHome([join(SKILL_FIXTURE, "..")]);
+    const child = spawnMcp({ HOME: home });
+    const pending = readResponses(child, { wantId: 2, timeoutMs: 120_000 });
+
+    child.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "memex_search",
+          arguments: { query: "standard development flow ship memex", threshold: 0.3 },
+        },
+      })}\n`,
+    );
+
+    const { responses, stderr } = await pending;
+    const search = responses.find((r) => r.id === 2) as {
+      error?: { message?: string };
+      result?: { content?: Array<{ text?: string }> };
+    };
+    expect(stderr).not.toMatch(/requires @huggingface\/transformers/);
+    expect(search?.error).toBeUndefined();
+    const payload = JSON.parse(search?.result?.content?.[0]?.text ?? "{}") as {
+      results?: Array<{ name?: string; relevance?: number }>;
+    };
+    expect(payload.results?.length).toBeGreaterThan(0);
+    expect(payload.results?.[0]?.name).toBe("launch-path-smoke-skill");
+    expect(payload.results?.[0]?.relevance).toBeGreaterThan(0.3);
+  }, 130_000);
 });

@@ -2,7 +2,6 @@ import type { Readable, Writable } from "node:stream";
 import { join } from "node:path";
 import {
   SkillIndex,
-  LocalEmbeddingProvider,
   loadTelemetry,
   saveTelemetry,
   recordMatch as coreRecordMatch,
@@ -11,6 +10,7 @@ import {
 import { loadConfig } from "../core/config.ts";
 import { getGrokPaths } from "../core/paths.ts";
 import { buildScanDirs } from "../core/index-init.ts";
+import { CompiledLocalEmbeddingProvider } from "../core/compiled-embedding.ts";
 import { runMcpServer } from "./server.ts";
 import { makeMemexTools } from "./tools.ts";
 import { OnceInit } from "./init.ts";
@@ -32,7 +32,7 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const cwd = opts.cwd ?? process.cwd();
   const config = await loadConfig();
   const paths = getGrokPaths();
-  const provider = new LocalEmbeddingProvider(config.embeddingModel, paths.modelsDir);
+  const provider = new CompiledLocalEmbeddingProvider(config.embeddingModel, paths.modelsDir);
   const cachePath = join(paths.cacheDir, "memex-cache.json");
   const index = new SkillIndex(config, provider, cachePath);
   const scanDirs = buildScanDirs(cwd, config);

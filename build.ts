@@ -6,6 +6,10 @@
  * Sharp is stubbed (we only use text embeddings). The ONNX runtime shared library
  * is copied alongside the binary so the embedding model can load.
  *
+ * Embeddings: `src/core/compiled-embedding.ts` statically imports
+ * `@huggingface/transformers` so bun traces it into the executable. memex-core's
+ * dynamic import() alone fails at runtime (/$bunfs virtual import.meta.url).
+ *
  * Usage:
  *   bun run build.ts                         # current platform
  *   bun run build.ts --target bun-linux-x64  # cross-compile
