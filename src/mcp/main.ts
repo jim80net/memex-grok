@@ -14,6 +14,7 @@ import { CompiledLocalEmbeddingProvider } from "../core/compiled-embedding.ts";
 import { runMcpServer } from "./server.ts";
 import { makeMemexTools } from "./tools.ts";
 import { OnceInit } from "./init.ts";
+import { LocationHandleCodec } from "./location-handle.ts";
 
 export interface RunMemexMcpOptions {
   stdin: Readable;
@@ -36,6 +37,7 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const cachePath = join(paths.cacheDir, "memex-cache.json");
   const index = new SkillIndex(config, provider, cachePath);
   const scanDirs = buildScanDirs(cwd, config);
+  const locations = LocationHandleCodec.forSession(cwd, config, paths);
 
   const init = new OnceInit(async () => {
     await index.build(scanDirs);
@@ -48,6 +50,7 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const tools = makeMemexTools({
     config,
     index,
+    locations,
     getIndexStats: () => ({
       // SkillIndex exposes .skillCount but not .all(); sourceCounts degrades to {} in Plan 1.
       size: index.skillCount,

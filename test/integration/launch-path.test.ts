@@ -11,7 +11,9 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
+import { homedir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
+import { assertNoHostPathLeaks } from "../../src/mcp/location-handle.ts";
 
 const DIST_DIR = join(process.cwd(), "dist", `${platform()}-${arch()}`);
 const BIN = join(DIST_DIR, "memex");
@@ -155,10 +157,73 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     expect(stderr).not.toMatch(/requires @huggingface\/transformers/);
     expect(search?.error).toBeUndefined();
     const payload = JSON.parse(search?.result?.content?.[0]?.text ?? "{}") as {
-      results?: Array<{ name?: string; relevance?: number }>;
+      results?: Array<{ name?: string; relevance?: number; location?: string }>;
     };
     expect(payload.results?.length).toBeGreaterThan(0);
     expect(payload.results?.[0]?.name).toBe("launch-path-smoke-skill");
     expect(payload.results?.[0]?.relevance).toBeGreaterThan(0.3);
+
+    const searchText = search?.result?.content?.[0]?.text ?? "";
+    assertNoHostPathLeaks(searchText, home);
+    expect(payload.results?.[0]?.location).toMatch(/^memex:\/\//);
   }, 130_000);
+
+  it("search→read_skill round-trip via portable handle (issues #6/#7)", async () => {
+    const home = isolatedHome([join(SKILL_FIXTURE, "..")]);
+    const child = spawnMcp({ HOME: home });
+    const pending = readResponses(child, { wantId: 2, timeoutMs: 120_000 });
+
+    child.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: {
+          name: "memex_search",
+          arguments: { query: "standard development flow ship memex", threshold: 0.3 },
+        },
+      })}\n`,
+    );
+
+    const { responses } = await pending;
+    const search = responses.find((r) => r.id === 2) as {
+      result?: { content?: Array<{ text?: string }> };
+    };
+    const searchPayload = JSON.parse(search?.result?.content?.[0]?.text ?? "{}") as {
+      query_id?: string;
+      results?: Array<{ location?: string }>;
+    };
+    const handle = searchPayload.results?.[0]?.location;
+    expect(handle).toMatch(/^memex:\/\//);
+
+    const child2 = spawnMcp({ HOME: home });
+    const pending2 = readResponses(child2, { wantId: 3, timeoutMs: 120_000 });
+    child2.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
+    child2.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    child2.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: {
+          name: "memex_read_skill",
+          arguments: { location: handle, query_id: searchPayload.query_id },
+        },
+      })}\n`,
+    );
+
+    const { responses: readResponses2, stderr } = await pending2;
+    const read = readResponses2.find((r) => r.id === 3) as {
+      error?: unknown;
+      result?: { content?: Array<{ text?: string }> };
+    };
+    expect(stderr).not.toMatch(/requires @huggingface\/transformers/);
+    expect(read?.error).toBeUndefined();
+    const body = read?.result?.content?.[0]?.text ?? "";
+    expect(body).toMatch(/brainstorm/i);
+    assertNoHostPathLeaks(body, home);
+    assertNoHostPathLeaks(JSON.stringify(read), homedir());
+  }, 260_000);
 });

@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { SkillIndex, SkillType } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
+import { type LocationHandleCodec, assertNoHostPathLeaks } from "./location-handle.ts";
 
 export interface SearchDeps {
   index: Pick<SkillIndex, "search">;
+  locations: LocationHandleCodec;
   defaultTopK: number;
   defaultThreshold: number;
 }
@@ -54,13 +56,15 @@ export function makeSearchTool(deps: SearchDeps): ToolHandler {
         results: hits.map((h) => ({
           name: h.skill.name,
           type: h.skill.type,
-          location: h.skill.location,
+          location: deps.locations.toHandle(h.skill.location),
           relevance: h.score,
           description: h.skill.description,
           best_query_index: h.bestQueryIndex,
         })),
       };
-      return { content: [{ type: "text" as const, text: JSON.stringify(payload, null, 2) }] };
+      const text = JSON.stringify(payload, null, 2);
+      assertNoHostPathLeaks(text);
+      return { content: [{ type: "text" as const, text }] };
     },
   };
 }

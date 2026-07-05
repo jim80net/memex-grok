@@ -1,5 +1,6 @@
 import type { SkillIndex } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
+import type { LocationHandleCodec } from "./location-handle.ts";
 
 export interface RecordMatchArgs {
   location: string;
@@ -8,7 +9,8 @@ export interface RecordMatchArgs {
 }
 
 export interface ReadSkillDeps {
-  index: Pick<SkillIndex, "readSkillContent">;
+  index: Pick<SkillIndex, "readSkillContent" | "search">;
+  locations: LocationHandleCodec;
   recordMatch: (args: RecordMatchArgs) => void | Promise<void>;
   sessionId: () => string;
 }
@@ -25,8 +27,8 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
   return {
     name: "memex_read_skill",
     description: [
-      "Read the full content of a skill, rule, or memory by `location` (path returned from",
-      "`memex_search`). If `query_id` is provided, the read is recorded as a telemetry match",
+      "Read the full content of a skill, rule, or memory by `location` (portable handle returned from",
+      "`memex_search`) or by `name`. If `query_id` is provided, the read is recorded as a telemetry match",
       "for the originating search — this keeps the GEPA query-refinement loop running and",
       "improves future relevance ranking. Always pass the `query_id` from the search that",
       "led you here.",
@@ -34,21 +36,30 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
     inputSchema: {
       type: "object",
       properties: {
-        location: { type: "string", description: "Absolute path to the skill/rule/memory file." },
+        location: {
+          type: "string",
+          description: "Portable handle from memex_search (memex://…); legacy absolute paths still accepted locally.",
+        },
+        name: { type: "string", description: "Skill/rule/memory name from memex_search (alternative to location)." },
         query_id: { type: "string", description: "The query_id from the memex_search call that surfaced this result." },
       },
-      required: ["location"],
+      required: [],
     },
     call: async (args: Record<string, unknown>) => {
-      const location = typeof args.location === "string" ? args.location : "";
-      if (!location) {
-        return { isError: true, content: [{ type: "text" as const, text: "location must be a non-empty string" }] };
+      const locationArg = typeof args.location === "string" ? args.location.trim() : "";
+      const nameArg = typeof args.name === "string" ? args.name.trim() : "";
+      if (!locationArg && !nameArg) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: "provide location (handle from memex_search) or name" }],
+        };
       }
       try {
-        const content = await deps.index.readSkillContent(location);
+        const absolute = await resolveReadTarget(deps, locationArg, nameArg);
+        const content = await deps.index.readSkillContent(absolute);
         const qid = typeof args.query_id === "string" ? args.query_id : null;
         if (qid) {
-          try { await deps.recordMatch({ location, queryId: qid, sessionId: deps.sessionId() }); }
+          try { await deps.recordMatch({ location: absolute, queryId: qid, sessionId: deps.sessionId() }); }
           catch { /* telemetry is best-effort */ }
         }
         return { content: [{ type: "text" as const, text: content }] };
@@ -58,4 +69,20 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
       }
     },
   };
+}
+
+async function resolveReadTarget(
+  deps: ReadSkillDeps,
+  locationArg: string,
+  nameArg: string,
+): Promise<string> {
+  if (locationArg) {
+    return deps.locations.resolveInput(locationArg);
+  }
+  const hits = await deps.index.search(nameArg, 20, 0);
+  const exact = hits.find((h) => h.skill.name === nameArg);
+  if (!exact) {
+    throw new Error(`no indexed entry with name '${nameArg}'`);
+  }
+  return exact.skill.location;
 }
