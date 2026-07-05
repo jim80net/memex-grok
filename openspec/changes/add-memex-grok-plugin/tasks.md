@@ -1,11 +1,13 @@
 > Detailed step-by-step instructions (with full code, test fixtures, and commit messages) will live in [`plan.md`](./plan.md) after writing-plans runs. This file is the high-level checklist that openspec uses to track progress.
 
+> **Checklist reconciled 2026-07-05 (issue #10).** `[x]` = code + tests exist; `[ ]` = not fully closed. **Partials (substantive code exists but `[ ]` because not fully complete):** §1.1 scaffolding (package.json/tsconfig/build.ts/.gitignore exist, repo builds+tests green; only the memex-core canonical-PID **pin bump** remains — blocked on §0.4/P4). §3.5 `src/main.ts` exists and dispatches `mcp`/`doctor`/`--version`; `hook`/`sync`/`index` are deferred stubs (full hook dispatch pending §3.1 hooks, which are dormant-by-design). §5.1/§5.3 `bin/install.sh` exists as the binary downloader and `build.ts` emits per-platform `dist/<platform>/`, but the in-plugin `bin/memex` stub + a `sha256sums` file are not done. §9.1 a dogfood **variant** shipped (registered via `grok mcp add`, live `memex_search` verified on grok-research) — the exact `grok plugin install ./` interactive flow is not the path taken. Everything else `[ ]` genuinely has no code yet.
+
 ## 0. Prerequisites — must pass before any feature code
 
 Each prerequisite produces a deliverable document under `docs/superpowers/prereqs/`. The implementation cannot move past §0 until every prereq doc records a pass (or a documented design-pivot).
 
 - [x] 0.1 **Validate P1 (MCP-from-plugin)** — **RESULT: PASS** (2026-05-26, grok 0.1.219; re-validated 2026-07-04, grok 0.2.82). Plugin `.mcp.json` loads the MCP server and the model calls the tool; native `grok mcp add` (the `--install-mcp` fallback) also validated against the built binary (`✓ handshake OK, ✓ 3 tools discovered`). Report + evidence in `docs/superpowers/prereqs/P1-mcp-from-plugin.md`. Two findings: (A) `node --experimental-strip-types` fatals on TS parameter properties — from-source launch broken, bundled binary unaffected → issue #3; (B) doctor `binaryRuns` used `version` not `--version` → fixed.
-- [ ] 0.2 **Validate P2 (plugin hooks in TTY)**. Procedure: re-create `tmp/probe-hooks-plugin/` with a hook script that writes `(event, env, stdin)` to `/tmp/p2-probe.log`. Install via `grok plugin install ./tmp/probe-hooks-plugin --trust`. Open `grok` interactively (full TTY), send one prompt, exit. Inspect `/tmp/p2-probe.log` for `session_start`, `user_prompt_submit`, and `stop` entries. Repeat headless via `grok -p "..."` for comparison. Acceptance: report at `docs/superpowers/prereqs/P2-plugin-hook-firing.md` covering both modes, ending in `RESULT: TTY-only | both | neither`.
+- [x] 0.2 **Validate P2 (plugin hooks in TTY)** — RESULT recorded (headless: hooks DO NOT fire; TTY unverified) in `docs/superpowers/prereqs/P2-plugin-hook-firing.md`; consistent with the hooks-dormant design (D1/D3). Procedure: re-create `tmp/probe-hooks-plugin/` with a hook script that writes `(event, env, stdin)` to `/tmp/p2-probe.log`. Install via `grok plugin install ./tmp/probe-hooks-plugin --trust`. Open `grok` interactively (full TTY), send one prompt, exit. Inspect `/tmp/p2-probe.log` for `session_start`, `user_prompt_submit`, and `stop` entries. Repeat headless via `grok -p "..."` for comparison. Acceptance: report at `docs/superpowers/prereqs/P2-plugin-hook-firing.md` covering both modes, ending in `RESULT: TTY-only | both | neither`.
 - [ ] 0.3 **Validate P3 (`${CLAUDE_PLUGIN_ROOT}` expansion)**. Procedure: only meaningful if P2 reports `TTY-only` or `both`. Modify the P2 probe to log `CLAUDE_PLUGIN_ROOT` and `GROK_PLUGIN_ROOT` env values; re-run. Acceptance: report at `docs/superpowers/prereqs/P3-plugin-env-vars.md` noting which variable expands; if only `GROK_PLUGIN_ROOT`, list every `${CLAUDE_PLUGIN_ROOT}` reference in `hooks/hooks.json` and `.mcp.json` that the build must substitute.
 - [ ] 0.4 **Track P4 (memex-core `canonicalProjectId`)** — coordinated change tracked at `https://github.com/jim80net/memex-core/issues/<TBD>`. This change is **blocked-on** P4 for tasks §1.1 (version pin), §2.3 (memory-mapping module), §3.x and §4.x (which depend on the pinned core). Update §1.1's pin once memex-core ships.
 - [ ] 0.5 **Track P5 (memex-claude `GROK_HOOK_EVENT` guard)** — coordinated change tracked at `https://github.com/jim80net/memex-claude/issues/<TBD>`. Blocks task §9.3 (coexistence test). When shipped, record the guard-introduction version in memex-core's exported constant (`GUARD_INTRODUCED_VERSION`) and add a note here.
@@ -18,8 +20,8 @@ Each prerequisite produces a deliverable document under `docs/superpowers/prereq
 
 ## 2. Core scaffolding (cross-harness-integration spec — partial)
 
-- [ ] 2.1 Create `src/core/paths.ts` exporting `getGrokPaths()` returning `~/.grok`-rooted paths plus `~/.local/share/memex` as the preferred sync repo. Tests first (cross-harness-integration spec → "Sync repo path policy").
-- [ ] 2.2 Create `src/core/config.ts` defining `GrokRouterConfig` extending `MemexCoreConfig`, with `loadConfig()` reading `~/.grok/memex.json`. Tests for defaults + merge behavior first.
+- [x] 2.1 Create `src/core/paths.ts` exporting `getGrokPaths()` returning `~/.grok`-rooted paths plus `~/.local/share/memex` as the preferred sync repo. Tests first (cross-harness-integration spec → "Sync repo path policy").
+- [x] 2.2 Create `src/core/config.ts` defining `GrokRouterConfig` extending `MemexCoreConfig`, with `loadConfig()` reading `~/.grok/memex.json`. Tests for defaults + merge behavior first.
 - [ ] 2.3 Create `src/core/memory-mapping.ts` calling `canonicalProjectId()` from memex-core and honoring `config.sync.projectMappings` overrides. Tests for the three resolution paths first (cross-harness-integration spec → "Project-id resolution honors memex-core canonical algorithm").
 
 ## 3. Hook runtime (hook-runtime spec)
@@ -32,10 +34,10 @@ Each prerequisite produces a deliverable document under `docs/superpowers/prereq
 
 ## 4. MCP server (mcp-server spec)
 
-- [ ] 4.1 Create `src/mcp/server.ts` with stdio JSON-RPC framing. Tests for initialize handshake, list_tools, call_tool first (mcp-server spec → "MCP server speaks stdio JSON-RPC").
-- [ ] 4.2 Create `src/mcp/tools.ts` with the three tool implementations: `memex_search`, `memex_read_skill` (with `query_id` telemetry threading), `memex_status`. Tests for each tool first (mcp-server spec → "Tool surface", "Telemetry threading").
-- [ ] 4.3 Implement first-call initialization inside `src/mcp/server.ts`: sync-pull (mtime-gated by `pullCacheMs`) + index-rebuild on first tool call of a process. Tests for the gating logic first (mcp-server spec → "First-call initialization").
-- [ ] 4.4 Wire grok-native `memory_search` detection into the tool description (prepends "Use this BEFORE memory_search…" note when detected). Test the description rendering both ways (mcp-server spec → "Tool description differentiates from memory_search").
+- [x] 4.1 Create `src/mcp/server.ts` with stdio JSON-RPC framing. Tests for initialize handshake, list_tools, call_tool first (mcp-server spec → "MCP server speaks stdio JSON-RPC").
+- [x] 4.2 Create `src/mcp/tools.ts` with the three tool implementations: `memex_search`, `memex_read_skill` (with `query_id` telemetry threading), `memex_status`. Tests for each tool first (mcp-server spec → "Tool surface", "Telemetry threading").
+- [x] 4.3 Implement first-call initialization inside `src/mcp/server.ts`: sync-pull (mtime-gated by `pullCacheMs`) + index-rebuild on first tool call of a process. Tests for the gating logic first (mcp-server spec → "First-call initialization").
+- [x] 4.4 Wire grok-native `memory_search` detection into the tool description (prepends "Use this BEFORE memory_search…" note when detected). Test the description rendering both ways (mcp-server spec → "Tool description differentiates from memory_search").
 
 ## 5. Bin stub + binary distribution (cross-harness-integration spec — continued)
 
