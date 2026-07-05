@@ -226,4 +226,39 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     assertNoHostPathLeaks(body, home);
     assertNoHostPathLeaks(JSON.stringify(read), homedir());
   }, 260_000);
+
+  it("memex_status reports populated index in the compiled binary (issue #9)", async () => {
+    const home = isolatedHome([join(SKILL_FIXTURE, "..")]);
+    const child = spawnMcp({ HOME: home });
+    const pending = readResponses(child, { wantId: 2, timeoutMs: 120_000 });
+
+    child.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "memex_status", arguments: {} },
+      })}\n`,
+    );
+
+    const { responses, stderr } = await pending;
+    const status = responses.find((r) => r.id === 2) as {
+      error?: unknown;
+      result?: { content?: Array<{ text?: string }> };
+    };
+    expect(stderr).not.toMatch(/requires @huggingface\/transformers/);
+    expect(status?.error).toBeUndefined();
+    const payload = JSON.parse(status?.result?.content?.[0]?.text ?? "{}") as {
+      index_size?: number;
+      source_counts?: Record<string, number>;
+    };
+    expect(payload.index_size).toBeGreaterThan(0);
+    expect(Object.keys(payload.source_counts ?? {}).length).toBeGreaterThan(0);
+    expect(Object.values(payload.source_counts ?? {}).reduce((a, b) => a + b, 0)).toBe(
+      payload.index_size,
+    );
+    assertNoHostPathLeaks(status?.result?.content?.[0]?.text ?? "", home);
+  }, 130_000);
 });
