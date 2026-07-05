@@ -15,6 +15,8 @@ import { runMcpServer } from "./server.ts";
 import { makeMemexTools } from "./tools.ts";
 import { OnceInit } from "./init.ts";
 import { LocationHandleCodec } from "./location-handle.ts";
+import { computeIndexStats } from "../core/index-stats.ts";
+import type { IndexStats } from "./tools-status.ts";
 
 export interface RunMemexMcpOptions {
   stdin: Readable;
@@ -39,8 +41,11 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const scanDirs = buildScanDirs(cwd, config);
   const locations = LocationHandleCodec.forSession(cwd, config, paths);
 
+  let indexStats: IndexStats = { size: 0, sourceCounts: {} };
+
   const init = new OnceInit(async () => {
     await index.build(scanDirs);
+    indexStats = await computeIndexStats(index, cachePath, config.embeddingModel);
   });
 
   // Per-process session ID (no grok-supplied id in stdio MCP).
@@ -51,11 +56,7 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
     config,
     index,
     locations,
-    getIndexStats: () => ({
-      // SkillIndex exposes .skillCount but not .all(); sourceCounts degrades to {} in Plan 1.
-      size: index.skillCount,
-      sourceCounts: {} as Record<string, number>,
-    }),
+    getIndexStats: () => indexStats,
     getLastSyncAt: () => lastSyncAt,
     recordMatch: async ({ location, queryId, sessionId: sid }) => {
       try {
