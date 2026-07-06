@@ -1,7 +1,8 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   buildScanRoots,
   resolvePortableLocationResolved,
+  type ScanRoot,
   type ScanRootRegistry,
 } from "@jim80net/memex-core";
 import type { GrokRouterConfig } from "../core/config.ts";
@@ -17,7 +18,7 @@ export function buildGrokScanRootRegistry(
   paths: GrokPaths = getGrokPaths(),
 ): ScanRootRegistry {
   const scanDirs = buildScanDirs(cwd, config);
-  return buildScanRoots(
+  const registry = buildScanRoots(
     {
       cwd,
       harness: "grok",
@@ -30,6 +31,21 @@ export function buildGrokScanRootRegistry(
     },
     scanDirs,
   );
+  // Grok scans peer harness project trees; core labels only this harness's projectSkillsDir.
+  return augmentPeerProjectRoots(cwd, registry);
+}
+
+/** Replace unclassified roots for peer harness project skill dirs with stable catalog keys. */
+function augmentPeerProjectRoots(cwd: string, registry: ScanRootRegistry): ScanRootRegistry {
+  const peerRoots: ScanRoot[] = [
+    { key: "claude-project", rootPath: resolve(join(cwd, ".claude", "skills")) },
+  ];
+  let out = registry;
+  for (const peer of peerRoots) {
+    out = out.filter((r) => r.rootPath !== peer.rootPath);
+    out.push(peer);
+  }
+  return out.sort((a, b) => b.rootPath.length - a.rootPath.length);
 }
 
 /**
