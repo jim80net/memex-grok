@@ -1,6 +1,6 @@
-import type { SkillIndex } from "@jim80net/memex-core";
+import type { ScanRootRegistry, SkillIndex } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
-import type { LocationHandleCodec } from "./location-handle.ts";
+import { assertAgentReadLocation } from "./location-handle.ts";
 
 export interface RecordMatchArgs {
   location: string;
@@ -10,7 +10,7 @@ export interface RecordMatchArgs {
 
 export interface ReadSkillDeps {
   index: Pick<SkillIndex, "readSkillContent" | "search">;
-  locations: LocationHandleCodec;
+  registry: ScanRootRegistry;
   recordMatch: (args: RecordMatchArgs) => void | Promise<void>;
   sessionId: () => string;
 }
@@ -18,10 +18,9 @@ export interface ReadSkillDeps {
 /**
  * Creates the `memex_read_skill` MCP tool handler.
  *
- * Reads the full content of a skill, rule, or memory by location path.
+ * Reads the full content of a skill, rule, or memory by portable handle.
  * When `query_id` is supplied, fires a best-effort telemetry record that
- * links this read back to the originating search query — keeping the GEPA
- * query-refinement loop running and improving future relevance ranking.
+ * links this read back to the originating search query.
  */
 export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
   return {
@@ -38,7 +37,7 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
       properties: {
         location: {
           type: "string",
-          description: "Portable handle from memex_search (memex://…); legacy absolute paths still accepted locally.",
+          description: "Portable handle from memex_search (memex://…); absolute paths are rejected.",
         },
         name: { type: "string", description: "Skill/rule/memory name from memex_search (alternative to location)." },
         query_id: { type: "string", description: "The query_id from the memex_search call that surfaced this result." },
@@ -55,12 +54,15 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
         };
       }
       try {
-        const absolute = await resolveReadTarget(deps, locationArg, nameArg);
-        const content = await deps.index.readSkillContent(absolute);
+        const readLocation = await resolveReadTarget(deps, locationArg, nameArg);
+        const content = await deps.index.readSkillContent(readLocation);
         const qid = typeof args.query_id === "string" ? args.query_id : null;
         if (qid) {
-          try { await deps.recordMatch({ location: absolute, queryId: qid, sessionId: deps.sessionId() }); }
-          catch { /* telemetry is best-effort */ }
+          try {
+            await deps.recordMatch({ location: readLocation, queryId: qid, sessionId: deps.sessionId() });
+          } catch {
+            /* telemetry is best-effort */
+          }
         }
         return { content: [{ type: "text" as const, text: content }] };
       } catch (e) {
@@ -77,12 +79,12 @@ async function resolveReadTarget(
   nameArg: string,
 ): Promise<string> {
   if (locationArg) {
-    return deps.locations.resolveInput(locationArg);
+    return assertAgentReadLocation(deps.registry, locationArg);
   }
   const hits = await deps.index.search(nameArg, 20, 0);
   const exact = hits.find((h) => h.skill.name === nameArg);
   if (!exact) {
     throw new Error(`no indexed entry with name '${nameArg}'`);
   }
-  return exact.skill.location;
+  return assertAgentReadLocation(deps.registry, exact.skill.location);
 }

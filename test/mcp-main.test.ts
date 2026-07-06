@@ -46,5 +46,36 @@ describe("runMemexMcp end-to-end", () => {
     expect(searchPayload.query_id).toBeTruthy();
     expect(searchPayload.results.length).toBeGreaterThanOrEqual(1);
     expect(searchPayload.results[0].name).toBe("hello");
+    expect(searchPayload.results[0].location).toMatch(/^memex:\/\//);
   }, 30000);
+
+  it("search→read_skill round-trips portable handle via registry wiring", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const { runMemexMcp } = await import("../src/mcp/main.ts");
+    const done = runMemexMcp({ stdin, stdout, cwd: "/work" });
+
+    stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n');
+    stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+    stdin.write('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memex_search","arguments":{"query":"say hi"}}}\n');
+
+    const chunks: Buffer[] = [];
+    stdout.on("data", (c) => chunks.push(c));
+    await new Promise((r) => setTimeout(r, 500));
+    const lines = Buffer.concat(chunks).toString("utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const searchPayload = JSON.parse(lines.find((l) => l.id === 2).result.content[0].text);
+    const handle = searchPayload.results[0].location;
+
+    stdin.write(
+      `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memex_read_skill","arguments":{"location":"${handle}","query_id":"${searchPayload.query_id}"}}}\n`,
+    );
+    await new Promise((r) => setTimeout(r, 500));
+    stdin.end();
+    await done;
+
+    const allLines = Buffer.concat(chunks).toString("utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const readLine = allLines.find((l) => l.id === 3);
+    expect(readLine?.error).toBeUndefined();
+    expect(readLine?.result?.content?.[0]?.text).toMatch(/Hello there/);
+  }, 60000);
 });

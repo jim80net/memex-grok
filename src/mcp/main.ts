@@ -14,7 +14,7 @@ import { CompiledLocalEmbeddingProvider } from "../core/compiled-embedding.ts";
 import { runMcpServer } from "./server.ts";
 import { makeMemexTools } from "./tools.ts";
 import { OnceInit } from "./init.ts";
-import { LocationHandleCodec } from "./location-handle.ts";
+import { buildGrokScanRootRegistry } from "./location-handle.ts";
 import { computeIndexStats } from "../core/index-stats.ts";
 import type { IndexStats } from "./tools-status.ts";
 
@@ -37,9 +37,9 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const paths = getGrokPaths();
   const provider = new CompiledLocalEmbeddingProvider(config.embeddingModel, paths.modelsDir);
   const cachePath = join(paths.cacheDir, "memex-cache.json");
-  const index = new SkillIndex(config, provider, cachePath);
+  const registry = buildGrokScanRootRegistry(cwd, config, paths);
+  const index = new SkillIndex(config, provider, cachePath, { registry });
   const scanDirs = buildScanDirs(cwd, config);
-  const locations = LocationHandleCodec.forSession(cwd, config, paths);
 
   let indexStats: IndexStats = { size: 0, sourceCounts: {} };
 
@@ -55,7 +55,7 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const tools = makeMemexTools({
     config,
     index,
-    locations,
+    registry,
     getIndexStats: () => indexStats,
     getLastSyncAt: () => lastSyncAt,
     recordMatch: async ({ location, queryId, sessionId: sid }) => {
