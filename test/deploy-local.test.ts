@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -12,29 +13,8 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dirname, "..");
 const SCRIPT = join(ROOT, "bin/deploy-local.sh");
-
-function detectPlatform(): string {
-  const os = execFileSync("uname", ["-s"], { encoding: "utf8" }).trim();
-  const arch = execFileSync("uname", ["-m"], { encoding: "utf8" }).trim();
-  const platformOs =
-    os === "Linux"
-      ? "linux"
-      : os === "Darwin"
-        ? "darwin"
-        : os.match(/MINGW|MSYS|CYGWIN/)
-          ? "win32"
-          : null;
-  const platformArch =
-    arch === "x86_64" || arch === "amd64"
-      ? "x64"
-      : arch === "aarch64" || arch === "arm64"
-        ? "arm64"
-        : null;
-  if (!platformOs || !platformArch) {
-    throw new Error(`unsupported platform: ${os}/${arch}`);
-  }
-  return `${platformOs}-${platformArch}`;
-}
+const SLEEP_BIN = "/bin/sleep";
+const TRUE_BIN = "/bin/true";
 
 const cleanups: Array<() => void> = [];
 
@@ -46,7 +26,7 @@ afterEach(() => {
 
 describe("deploy-local.sh", () => {
   it.skipIf(process.platform === "win32")(
-    "redeploys over a running deployed binary (rm-then-copy)",
+    "redeploys over a running deployed ELF binary (rm-then-copy)",
     () => {
       const installDir = join(
         tmpdir(),
@@ -62,14 +42,10 @@ describe("deploy-local.sh", () => {
       cleanups.push(() => rmSync(srcDir, { recursive: true, force: true }));
 
       const runningBin = join(installDir, "memex-grok");
-      writeFileSync(
-        runningBin,
-        "#!/bin/sh\nwhile true; do sleep 3600; done\n",
-        { mode: 0o755 },
-      );
+      copyFileSync(SLEEP_BIN, runningBin);
       chmodSync(runningBin, 0o755);
 
-      const runner = spawn(runningBin, [], {
+      const runner = spawn(runningBin, ["3600"], {
         detached: true,
         stdio: "ignore",
       });
@@ -87,7 +63,7 @@ describe("deploy-local.sh", () => {
       });
 
       const binSrc = join(srcDir, "memex");
-      writeFileSync(binSrc, "#!/bin/sh\necho redeployed-ok\n", { mode: 0o755 });
+      copyFileSync(TRUE_BIN, binSrc);
       chmodSync(binSrc, 0o755);
       writeFileSync(join(srcDir, ".stamp"), "0.1.0-alpha.0+deploy17\n");
       writeFileSync(join(srcDir, "libonnxruntime.so.1"), "fake-onnx-v2\n");
@@ -102,7 +78,7 @@ describe("deploy-local.sh", () => {
       expect(result.status).toBe(0);
       expect(result.stderr).toContain("Deployed");
 
-      expect(readFileSync(runningBin, "utf8")).toContain("redeployed-ok");
+      expect(readFileSync(runningBin)).toEqual(readFileSync(binSrc));
       expect(readFileSync(join(installDir, "libonnxruntime.so.1"), "utf8")).toBe(
         "fake-onnx-v2\n",
       );
