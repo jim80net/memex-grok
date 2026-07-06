@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import type { SkillIndex, SkillType } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
-import { type LocationHandleCodec, assertNoHostPathLeaks } from "./location-handle.ts";
+import { assertNoHostPathLeaks } from "../core/host-path-egress.ts";
+import type { LocationHandleCodec } from "./location-handle.ts";
 
 export interface SearchDeps {
   index: Pick<SkillIndex, "search">;

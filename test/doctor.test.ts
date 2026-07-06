@@ -104,6 +104,33 @@ describe("sync-repo check (coexistence/deferral)", () => {
   });
 });
 
+describe("host-path egress (#13)", () => {
+  it("scrubs /home/ from every check message", async () => {
+    const fakeHome = "/home/testuser";
+    const paths = fakePaths({
+      binaryCacheDir: `${fakeHome}/.cache/memex-grok`,
+      syncRepoDir: `${fakeHome}/.local/share/memex`,
+      configPath: `${fakeHome}/.grok/memex.json`,
+      modelsDir: `${fakeHome}/.grok/cache/models`,
+      cacheDir: `${fakeHome}/.grok/cache`,
+      telemetryPath: `${fakeHome}/.grok/cache/telemetry.json`,
+      sessionsDir: `${fakeHome}/.grok/cache/sessions`,
+    });
+    const r = await runChecks(
+      paths,
+      probes({
+        findBinary: () => `${fakeHome}/.cache/memex-grok/memex-grok`,
+      }),
+    );
+    const blob = JSON.stringify(r);
+    expect(blob).not.toMatch(/\/home\//);
+    for (const c of r.checks) {
+      expect(c.message).not.toMatch(/\/home\//);
+    }
+    expect(r.checks.find((c) => c.name === "binary")?.message).toContain("~/.cache/memex-grok");
+  });
+});
+
 describe("advisory checks never FAIL", () => {
   it("config/model absent → WARN; hooks → WARN (dormant by design)", async () => {
     const r = await runChecks(fakePaths(), probes());
