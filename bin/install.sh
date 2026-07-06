@@ -77,5 +77,12 @@ fi
     [ -f "$lib" ] && cp "$lib" "$DIR/"
   done
 
+  STAMP_FILE="$DIR/.stamp"
+  if "$BIN_DEST" --version >"$STAMP_FILE" 2>/dev/null; then
+    [ -z "${MEMEX_INSTALL_QUIET:-}" ] && echo "Recorded deploy stamp in $STAMP_FILE" >&2
+  else
+    echo "$REAL_VERSION" >"$STAMP_FILE"
+  fi
+
   echo "Installed memex $REAL_VERSION to $BIN_DEST" >&2
 } >>"$LOG" 2>&1 || { tail -20 "$LOG" >&2; exit 1; }

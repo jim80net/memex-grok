@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const VERSION = process.env.MEMEX_GROK_VERSION ?? "0.0.0-dev";
+const BUILD_STAMP = process.env.MEMEX_GROK_BUILD_STAMP ?? VERSION;
 
 const USAGE = `usage: memex <subcommand> [args]
 
@@ -22,7 +23,7 @@ async function main(): Promise<number> {
   }
   const sub = argv[0];
   if (sub === "--version" || sub === "-v") {
-    process.stdout.write(VERSION + "\n");
+    process.stdout.write(BUILD_STAMP + "\n");
     return 0;
   }
   if (sub === "mcp") {
