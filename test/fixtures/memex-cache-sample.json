@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "embeddingModel": "Xenova/all-MiniLM-L6-v2",
   "skills": {
     "/skills/a/SKILL.md": {

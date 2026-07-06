@@ -1,15 +1,14 @@
-import type { SkillIndex } from "@jim80net/memex-core";
+import type { SkillIndex, ScanRootRegistry } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
 import type { GrokRouterConfig } from "../core/config.ts";
 import { makeSearchTool } from "./tools-search.ts";
 import { makeReadSkillTool, type RecordMatchArgs } from "./tools-read.ts";
 import { makeStatusTool, type IndexStats } from "./tools-status.ts";
-import type { LocationHandleCodec } from "./location-handle.ts";
 
 export interface MemexToolsDeps {
   config: GrokRouterConfig;
   index: SkillIndex;
-  locations: LocationHandleCodec;
+  registry: ScanRootRegistry;
   getIndexStats: () => IndexStats;
   getLastSyncAt: () => string | null;
   recordMatch: (args: RecordMatchArgs) => void | Promise<void>;
@@ -26,13 +25,12 @@ export function makeMemexTools(deps: MemexToolsDeps): ToolHandler[] {
   return [
     makeSearchTool({
       index: deps.index,
-      locations: deps.locations,
       defaultTopK: deps.config.hooks.UserPromptSubmit.topK ?? 5,
       defaultThreshold: deps.config.hooks.UserPromptSubmit.threshold ?? 0.5,
     }),
     makeReadSkillTool({
       index: deps.index,
-      locations: deps.locations,
+      registry: deps.registry,
       recordMatch: deps.recordMatch,
       sessionId: deps.sessionId,
     }),
