@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { assertNoHostPathLeaks, scrubHostPaths } from "../core/host-path-egress.ts";
 import { type GrokPaths, getGrokPaths } from "../core/paths.ts";
 
 const execFileAsync = promisify(execFile);
@@ -58,7 +59,19 @@ export async function runChecks(
     checkModel(paths),
     checkHooks(),
   ];
-  return { ok: !checks.some((c) => c.severity === "FAIL"), checks };
+  const report: DoctorReport = { ok: !checks.some((c) => c.severity === "FAIL"), checks };
+  return sanitizeReport(report);
+}
+
+function sanitizeReport(report: DoctorReport): DoctorReport {
+  const checks = report.checks.map((c) => ({
+    ...c,
+    message: scrubHostPaths(c.message),
+  }));
+  const sanitized = { ...report, checks };
+  const blob = JSON.stringify(sanitized);
+  assertNoHostPathLeaks(blob);
+  return sanitized;
 }
 
 export async function runDoctor(args: string[]): Promise<number> {

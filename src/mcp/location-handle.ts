@@ -143,12 +143,4 @@ function isAbsolutePath(p: string): boolean {
   return p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
 }
 
-/** Test/helper: assert MCP JSON text has no host-specific path leaks. */
-export function assertNoHostPathLeaks(text: string, home = homedir()): void {
-  if (text.includes("/home/")) {
-    throw new Error("MCP output leaks /home/ path");
-  }
-  if (home && text.includes(home)) {
-    throw new Error("MCP output leaks user home path");
-  }
-}
+export { assertNoHostPathLeaks } from "../core/host-path-egress.ts";
