@@ -24,7 +24,7 @@ detect_platform() {
 }
 
 PLATFORM="$(detect_platform)"
-SRC="$ROOT/dist/$PLATFORM"
+SRC="${MEMEX_DEPLOY_SRC:-$ROOT/dist/$PLATFORM}"
 BIN_SRC="$SRC/memex"
 BIN_DEST="$INSTALL/memex-grok"
 STAMP_SRC="$SRC/.stamp"
@@ -32,11 +32,24 @@ STAMP_DEST="$INSTALL/.stamp"
 
 [ -f "$BIN_SRC" ] || { echo "Missing build artifact: $BIN_SRC (run pnpm build first)" >&2; exit 1; }
 
+# Unlink-then-copy so redeploy works while a desk still holds the old inode open
+# (plain cp fails with "Text file busy" on a running executable).
+safe_replace_file() {
+  src="$1"
+  dest="$2"
+  if [ -e "$dest" ] && ! rm -f "$dest"; then
+    echo "error: could not remove $dest — rotate the desk to release the binary, then re-run" >&2
+    exit 1
+  fi
+  cp "$src" "$dest"
+}
+
 mkdir -p "$INSTALL"
-cp "$BIN_SRC" "$BIN_DEST"
+safe_replace_file "$BIN_SRC" "$BIN_DEST"
 chmod +x "$BIN_DEST"
 for lib in "$SRC"/*.so* "$SRC"/*.dylib "$SRC"/*.dll; do
-  [ -f "$lib" ] && cp "$lib" "$INSTALL/"
+  [ -f "$lib" ] || continue
+  safe_replace_file "$lib" "$INSTALL/$(basename "$lib")"
 done
 
 if [ -f "$STAMP_SRC" ]; then
