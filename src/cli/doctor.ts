@@ -11,10 +11,15 @@
 // verify"), NOT a crash — only a definitively-broken install is a FAIL.
 
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import {
+  deployStampPath,
+  localBuildStampPath,
+  normalizeStamp,
+} from "../core/build-stamp.ts";
 import { assertNoHostPathLeaks, scrubHostPaths } from "../core/host-path-egress.ts";
 import { type GrokPaths, getGrokPaths } from "../core/paths.ts";
 
@@ -53,6 +58,7 @@ export async function runChecks(
 ): Promise<DoctorReport> {
   const checks: Check[] = [
     await checkBinary(paths, probes),
+    await checkDeployedBinary(paths, probes),
     await checkMcpRegistration(probes),
     checkSyncRepo(paths),
     checkConfig(paths),
@@ -96,6 +102,12 @@ export interface DoctorProbes {
   findBinary: (paths: GrokPaths) => string | null;
   /** `<binary> --version` → true if it runs and exits 0. */
   binaryRuns: (binaryPath: string) => Promise<boolean>;
+  /** `<binary> --version` stdout (build stamp), or null if unreadable. */
+  binaryStamp: (binaryPath: string) => Promise<string | null>;
+  /** Deploy marker under the binary cache dir (issue #14, option a). */
+  readDeployStamp: (paths: GrokPaths) => string | null;
+  /** Latest local `dist/<platform>/.stamp` when present (dev workflow). */
+  readAvailableStamp: (paths: GrokPaths) => string | null;
   /** grok's registered MCP server ids, or null if the grok CLI is not
    *  installed / not inspectable on this host. */
   grokMcpServers: () => Promise<string[] | null>;
@@ -120,6 +132,20 @@ const defaultProbes: DoctorProbes = {
       return false;
     }
   },
+  async binaryStamp(binaryPath) {
+    try {
+      const { stdout } = await execFileAsync(binaryPath, ["--version"], { timeout: 10_000 });
+      return normalizeStamp(stdout);
+    } catch {
+      return null;
+    }
+  },
+  readDeployStamp(paths) {
+    return readStampFile(deployStampPath(paths.binaryCacheDir));
+  },
+  readAvailableStamp(_paths) {
+    return readStampFile(localBuildStampPath());
+  },
   async grokMcpServers() {
     // grok's MCP registry surface; absent on a non-grok host → null (cannot verify).
     for (const args of [
@@ -140,6 +166,59 @@ const defaultProbes: DoctorProbes = {
 // ---------------------------------------------------------------------------
 // Checks
 // ---------------------------------------------------------------------------
+
+async function checkDeployedBinary(paths: GrokPaths, probes: DoctorProbes): Promise<Check> {
+  const bin = probes.findBinary(paths);
+  if (!bin) {
+    return {
+      name: "deployed-binary",
+      severity: "WARN",
+      message: "skipped — no deployed binary to compare",
+    };
+  }
+
+  const deployed = await probes.binaryStamp(bin);
+  if (!deployed) {
+    return {
+      name: "deployed-binary",
+      severity: "WARN",
+      message: "cannot read build stamp from deployed binary",
+    };
+  }
+
+  const marker = probes.readDeployStamp(paths);
+  const available = probes.readAvailableStamp(paths);
+
+  if (marker && deployed !== marker) {
+    return {
+      name: "deployed-binary",
+      severity: "WARN",
+      message: `deployed ${deployed} is stale, expected ${marker} — redeploy`,
+    };
+  }
+
+  if (available && deployed !== available) {
+    return {
+      name: "deployed-binary",
+      severity: "WARN",
+      message: `deployed ${deployed} is stale, available ${available} — redeploy`,
+    };
+  }
+
+  if (!marker && !available) {
+    return {
+      name: "deployed-binary",
+      severity: "WARN",
+      message: `no deploy stamp at ${deployStampPath(paths.binaryCacheDir)}; record one when deploying`,
+    };
+  }
+
+  return {
+    name: "deployed-binary",
+    severity: "OK",
+    message: `deploy stamp ${deployed} matches deployed binary`,
+  };
+}
 
 async function checkBinary(paths: GrokPaths, probes: DoctorProbes): Promise<Check> {
   const bin = probes.findBinary(paths);
@@ -225,6 +304,15 @@ function checkHooks(): Check {
 // ---------------------------------------------------------------------------
 // Private
 // ---------------------------------------------------------------------------
+
+function readStampFile(path: string): string | null {
+  if (!existsSync(path)) return null;
+  try {
+    return normalizeStamp(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
 
 /** Pull server ids out of whatever shape the grok MCP registry returns. */
 function extractServerIds(parsed: unknown): string[] {

@@ -28,10 +28,15 @@ function fakePaths(over: Partial<GrokPaths> = {}): GrokPaths {
 }
 
 // Probes for a "fully healthy" install by default; tests override per-case.
+const STAMP_OK = "0.1.0-alpha.0+abc1234";
+
 function probes(over: Partial<DoctorProbes> = {}): DoctorProbes {
   return {
     findBinary: () => "/fake/memex-grok",
     binaryRuns: async () => true,
+    binaryStamp: async () => STAMP_OK,
+    readDeployStamp: () => STAMP_OK,
+    readAvailableStamp: () => null,
     grokMcpServers: async () => ["memex-grok"],
     ...over,
   };
@@ -128,6 +133,58 @@ describe("host-path egress (#13)", () => {
       expect(c.message).not.toMatch(/\/home\//);
     }
     expect(r.checks.find((c) => c.name === "binary")?.message).toContain("~/.cache/memex-grok");
+  });
+});
+
+describe("deployed-binary drift check (#14)", () => {
+  it("matching deploy stamp → OK", async () => {
+    const r = await runChecks(fakePaths(), probes());
+    expect(sev(r, "deployed-binary")).toBe("OK");
+    expect(r.checks.find((c) => c.name === "deployed-binary")?.message).toContain(STAMP_OK);
+  });
+
+  it("deployed stamp differs from marker → WARN citing both", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        binaryStamp: async () => "0.1.0-alpha.0+old1111",
+        readDeployStamp: () => "0.1.0-alpha.0+new2222",
+      }),
+    );
+    expect(sev(r, "deployed-binary")).toBe("WARN");
+    const msg = r.checks.find((c) => c.name === "deployed-binary")?.message ?? "";
+    expect(msg).toContain("0.1.0-alpha.0+old1111");
+    expect(msg).toContain("0.1.0-alpha.0+new2222");
+    expect(msg).toContain("redeploy");
+    expect(r.ok).toBe(true);
+  });
+
+  it("deployed stamp differs from local build → WARN citing available", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        binaryStamp: async () => "0.1.0-alpha.0+deployed",
+        readDeployStamp: () => "0.1.0-alpha.0+deployed",
+        readAvailableStamp: () => "0.1.0-alpha.0+freshbuild",
+      }),
+    );
+    expect(sev(r, "deployed-binary")).toBe("WARN");
+    const msg = r.checks.find((c) => c.name === "deployed-binary")?.message ?? "";
+    expect(msg).toContain("0.1.0-alpha.0+deployed");
+    expect(msg).toContain("0.1.0-alpha.0+freshbuild");
+    expect(msg).toContain("available");
+  });
+
+  it("no marker and no local build stamp → WARN to record deploy stamp", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        readDeployStamp: () => null,
+        readAvailableStamp: () => null,
+      }),
+    );
+    expect(sev(r, "deployed-binary")).toBe("WARN");
+    expect(r.checks.find((c) => c.name === "deployed-binary")?.message).toContain(".stamp");
   });
 });
 

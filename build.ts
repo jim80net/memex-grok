@@ -14,10 +14,19 @@
  *   bun run build.ts                         # current platform
  *   bun run build.ts --target bun-linux-x64  # cross-compile
  */
-import { mkdirSync, cpSync, rmSync, symlinkSync, readlinkSync, existsSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, cpSync, rmSync, symlinkSync, readlinkSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { platform, arch } from "node:os";
+import { formatBuildStamp } from "./src/core/build-stamp.ts";
+
+function gitShortSha(): string {
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 function resolveOnnxBase(): string {
   const pnpmBase = "node_modules/.pnpm";
@@ -84,11 +93,18 @@ Bun.write(join(SHARP_SYMLINK, "index.js"), "module.exports = {};");
 
 try {
   const pkgVersion = JSON.parse(readFileSync("package.json", "utf-8")).version;
+  const buildStamp = formatBuildStamp(pkgVersion, gitShortSha());
   mkdirSync(outDir, { recursive: true });
   const outFile = join(outDir, platConfig.binaryName);
-  const args = ["build", "--compile", "src/main.ts", "--outfile", outFile, "--define", `process.env.MEMEX_GROK_VERSION='"${pkgVersion}"'`];
+  const defines = [
+    `process.env.MEMEX_GROK_VERSION='"${pkgVersion}"'`,
+    `process.env.MEMEX_GROK_BUILD_STAMP='"${buildStamp}"'`,
+  ];
+  const args = ["build", "--compile", "src/main.ts", "--outfile", outFile, ...defines.flatMap((d) => ["--define", d])];
   if (targetFlag) args.push("--target", targetFlag);
   execSync(`bun ${args.join(" ")}`, { stdio: "inherit" });
+  writeFileSync(join(outDir, ".stamp"), `${buildStamp}\n`, "utf8");
+  console.log(`  Build stamp: ${buildStamp}`);
 
   for (const lib of platConfig.sharedLibs) {
     const src = join(platConfig.onnxDir, lib);
