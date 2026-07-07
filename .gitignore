@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+.claude/settings.local.json
+tmp/
+.worktrees/
+
+# Prebuilt binary (downloaded by bin/install.sh, not checked in)
+bin/memex.bin
+bin/memex.exe
+bin/*.so*
+bin/*.dylib
+bin/*.dll
+bin/.install-*
+bin/.install.log
+bin/.installing.lock
