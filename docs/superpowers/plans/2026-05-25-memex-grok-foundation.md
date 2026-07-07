@@ -355,7 +355,9 @@ git commit -m "docs(prereqs): record P3 — plugin env-var expansion"
 ### Task 1: Package + tooling config
 
 **Files:**
-- Create: `package.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore`, `.npmrc`
+- Create: `package.json`, `tsconfig.json`, `vitest.config.ts`, `.gitignore`, `.npmrc`, `stubs/sharp/{package.json,index.js}`, `src/main.ts`
+
+> **Note:** the `src/main.ts` placeholder is included here so `pnpm typecheck` has at least one matching input file. Without it, `tsc --noEmit` errors with `TS18003: No inputs were found in config file`. Task 2 re-uses this same placeholder.
 
 - [ ] **Step 1: Write `package.json`**
 
@@ -480,7 +482,23 @@ mkdir -p stubs/sharp
 module.exports = {};
 ```
 
-- [ ] **Step 7: Install and verify tooling**
+- [ ] **Step 7: Create `src/main.ts` placeholder**
+
+```bash
+mkdir -p src
+```
+
+`src/main.ts`:
+```ts
+#!/usr/bin/env node
+// Placeholder — real dispatcher comes in Task 15.
+console.error("memex-grok: not yet implemented");
+process.exit(1);
+```
+
+This satisfies tsc's input-glob check. Task 2 re-uses this file as the build entry point; Task 15 replaces its contents with the real dispatcher.
+
+- [ ] **Step 8: Install and verify tooling**
 
 Run:
 ```bash
@@ -488,13 +506,16 @@ pnpm install
 pnpm typecheck
 ```
 
-Expected: both succeed without errors. `node_modules/` is created, no TypeScript errors (there are no source files yet, so typecheck is trivially green).
+Expected: both succeed without errors. `node_modules/` is created, `pnpm-lock.yaml` is generated, `tsc --noEmit` exits 0 against `src/main.ts`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add package.json tsconfig.json vitest.config.ts .gitignore .npmrc stubs/ pnpm-lock.yaml
-git commit -m "chore: bootstrap package, typescript, vitest, and pnpm config"
+git add package.json tsconfig.json vitest.config.ts .gitignore .npmrc stubs/ src/main.ts pnpm-lock.yaml
+git commit -m "chore: bootstrap package, typescript, vitest, and pnpm config
+
+Includes src/main.ts placeholder so pnpm typecheck has an input file;
+the real dispatcher lands in Task 15."
 ```
 
 ---
@@ -610,19 +631,23 @@ try {
 }
 ```
 
-- [ ] **Step 2: Create `src/main.ts` placeholder so build has an entry point**
+- [ ] **Step 2: Verify `src/main.ts` placeholder is present**
+
+Task 1 already created this file. Confirm:
 
 ```bash
-mkdir -p src
+test -f src/main.ts && head -4 src/main.ts
 ```
 
-`src/main.ts`:
-```ts
+Expected output:
+```
 #!/usr/bin/env node
 // Placeholder — real dispatcher comes in Task 15.
 console.error("memex-grok: not yet implemented");
 process.exit(1);
 ```
+
+If the file is missing or differs, re-create it with the contents above before proceeding.
 
 - [ ] **Step 3: Run the build to verify the toolchain works**
 
@@ -2376,7 +2401,7 @@ main().then((code) => process.exit(code)).catch((err) => {
 });
 ```
 
-> The `doctor` import is added now even though `src/cli/doctor.ts` doesn't exist yet — Task 21 creates it. The test for `doctor` lives in Task 21's test file; for Task 15 we only assert version/unimplemented/usage paths, all of which don't import doctor.
+> The `doctor` import requires a stub `src/cli/doctor.ts` to keep typecheck green (TS can't see lazy `await import` paths without resolution). Task 15 ships a stub with `export async function runDoctor(args: string[]): Promise<number>` that writes "not yet implemented (Task 21)" to stderr and returns 1. Task 21 replaces the stub with the real implementation. The test for `doctor` lives in Task 21's test file; for Task 15 we only assert version/unimplemented/usage paths.
 
 - [ ] **Step 4: Run, verify pass**
 

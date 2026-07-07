@@ -1,0 +1,30 @@
+{
+  "version": 3,
+  "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+  "skills": {
+    "/skills/a/SKILL.md": {
+      "name": "a",
+      "description": "A",
+      "queries": ["a"],
+      "embeddings": [[1, 0]],
+      "mtime": 1,
+      "type": "skill"
+    },
+    "/skills/b/SKILL.md": {
+      "name": "b",
+      "description": "B",
+      "queries": ["b"],
+      "embeddings": [[0, 1]],
+      "mtime": 1,
+      "type": "skill"
+    },
+    "/rules/r.md": {
+      "name": "r",
+      "description": "R",
+      "queries": ["r"],
+      "embeddings": [[1, 1]],
+      "mtime": 1,
+      "type": "rule"
+    }
+  }
+}

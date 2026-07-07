@@ -54,6 +54,22 @@ grok watches `~/.grok/memory/` for file changes and reindexes on every edit. A s
 
 **Affects**: `bundled-skills` spec — see "Read-only invariant" requirement.
 
+### D9. Three-tier SCOPE — desk / flotilla / fleet (memex-core owns resolution)
+
+**Operator directive (2026-07-04):** Grok's only reliable memex surfaces are filesystem sync and MCP tools — not hook injection. Rules, skills, and standing memory must apply at different breadths. memex-core resolves scope at index time; adapters stay thin.
+
+| Scope | Corpus path | Applies to |
+|-------|-------------|------------|
+| Desk (project) | `projects/<canonical-id>/` | One git repo / worktree |
+| Flotilla | `flotillas/<flotilla-id>/` | All desks under one project-XO |
+| Fleet (global/user) | `fleet/` | Operator standing rules + constitution |
+
+Precedence on ID collision: **fleet < flotilla < desk** (narrower wins). Grok reaches fleet/flotilla TRUSTED rules only via synced files the MCP server indexes — never via hook `additionalContext`.
+
+**Affects**: `mcp-server` spec — index build must union applicable scope dirs (once memex-core ships the layout); `cross-harness-integration` spec — read paths honor scope union; bundled skills write to the correct scope bucket.
+
+**Authoritative design:** `memex-core/design/knowledge-scope-three-tier.md`
+
 ## Open questions deferred to plan.md
 
 1. MCP SDK choice: official `@modelcontextprotocol/sdk` vs hand-rolled slim JSON-RPC (binary-size consideration).
