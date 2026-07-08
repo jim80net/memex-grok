@@ -259,8 +259,9 @@ async function checkMcpRegistration(probes: DoctorProbes): Promise<Check> {
     ? { name: "mcp-registration", severity: "OK", message: "memex MCP server registered with grok" }
     : {
         name: "mcp-registration",
-        severity: "FAIL",
-        message: `memex MCP server not registered (grok knows: ${servers.join(", ") || "none"})`,
+        severity: "WARN",
+        message:
+          "not registered in this cwd (registration is project-scoped — run from your project dir or `grok mcp add`)",
       };
 }
 
