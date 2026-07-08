@@ -2,9 +2,10 @@
 // "Doctor command reports installation health"). Probes are injected so no test
 // shells out to a real grok/binary; severity→exit semantics are pinned.
 
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { chdir } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 import { type DoctorProbes, runChecks } from "../src/cli/doctor.ts";
 import type { GrokPaths } from "../src/core/paths.ts";
@@ -45,7 +46,20 @@ function probes(over: Partial<DoctorProbes> = {}): DoctorProbes {
 const sev = (r: Awaited<ReturnType<typeof runChecks>>, name: string) =>
   r.checks.find((c) => c.name === name)?.severity;
 
+/** Project-scoped MCP list: read cwd `.grok/config.toml` only (mirrors grok behavior). */
+function projectScopedMcpServersFromCwdConfig(): DoctorProbes["grokMcpServers"] {
+  return async () => {
+    const configPath = join(process.cwd(), ".grok", "config.toml");
+    if (!existsSync(configPath)) return [];
+    const text = readFileSync(configPath, "utf8");
+    return /memex/i.test(text) ? ["memex-grok"] : [];
+  };
+}
+
+const origCwd = process.cwd();
+
 afterEach(async () => {
+  chdir(origCwd);
   const { rm } = await import("node:fs/promises");
   await Promise.all(roots.splice(0).map((r) => rm(r, { recursive: true, force: true })));
 });
@@ -91,10 +105,29 @@ describe("mcp-registration check (grok's primary surface)", () => {
     const r = await runChecks(fakePaths(), probes({ grokMcpServers: async () => ["other", "memex-grok"] }));
     expect(sev(r, "mcp-registration")).toBe("OK");
   });
-  it("grok present but memex NOT registered → FAIL", async () => {
+  it("grok present but memex NOT registered in cwd → WARN (#25)", async () => {
     const r = await runChecks(fakePaths(), probes({ grokMcpServers: async () => ["something-else"] }));
-    expect(sev(r, "mcp-registration")).toBe("FAIL");
-    expect(r.ok).toBe(false);
+    expect(sev(r, "mcp-registration")).toBe("WARN");
+    expect(r.checks.find((c) => c.name === "mcp-registration")?.message).toMatch(/not registered in this cwd/);
+    expect(r.ok).toBe(true);
+  });
+
+  it("memex in dir A config, doctor from dir B → WARN + exit 0 via real cwd config read (#25)", async () => {
+    const dirA = mkdtempSync(join(tmpdir(), "grok-mcp-a-"));
+    const dirB = mkdtempSync(join(tmpdir(), "grok-mcp-b-"));
+    roots.push(dirA, dirB);
+    mkdirSync(join(dirA, ".grok"), { recursive: true });
+    writeFileSync(join(dirA, ".grok", "config.toml"), "[mcp.servers.memex-grok]\n", "utf8");
+
+    chdir(dirB);
+    const paths = fakePaths();
+    mkdirSync(paths.syncRepoDir, { recursive: true });
+    const r = await runChecks(paths, {
+      ...probes(),
+      grokMcpServers: projectScopedMcpServersFromCwdConfig(),
+    });
+    expect(sev(r, "mcp-registration")).toBe("WARN");
+    expect(r.ok).toBe(true);
   });
 });
 
