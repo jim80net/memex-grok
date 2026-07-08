@@ -188,6 +188,17 @@ describe("deployed-binary drift check (#14)", () => {
   });
 });
 
+describe("expected-by-design WARN grouping (#26)", () => {
+  it("marks sync-repo/config/hooks WARNs as expectedByDesign", async () => {
+    const r = await runChecks(fakePaths(), probes());
+    for (const name of ["sync-repo", "config", "hooks"]) {
+      const c = r.checks.find((x) => x.name === name);
+      expect(c?.severity).toBe("WARN");
+      expect(c?.expectedByDesign).toBe(true);
+    }
+  });
+});
+
 describe("advisory checks never FAIL", () => {
   it("config/model absent → WARN; hooks → WARN (dormant by design)", async () => {
     const r = await runChecks(fakePaths(), probes());

@@ -10,8 +10,24 @@ export interface JsonRpcMessage {
   error?: { code: number; message: string; data?: unknown };
 }
 
+export interface ReadMessagesOptions {
+  /** Called when a non-blank line is not valid JSON-RPC (server stays alive). */
+  onParseError?: (line: string) => void;
+}
+
+function parseMessageLine(line: string): JsonRpcMessage | null {
+  try {
+    return JSON.parse(line) as JsonRpcMessage;
+  } catch {
+    return null;
+  }
+}
+
 /** Yields one JsonRpcMessage per non-blank line on the given stream. */
-export async function* readMessages(input: Readable): AsyncGenerator<JsonRpcMessage> {
+export async function* readMessages(
+  input: Readable,
+  opts: ReadMessagesOptions = {},
+): AsyncGenerator<JsonRpcMessage> {
   let buffer = "";
   for await (const chunk of input) {
     buffer += (chunk as Buffer).toString("utf8");
@@ -20,11 +36,23 @@ export async function* readMessages(input: Readable): AsyncGenerator<JsonRpcMess
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
       if (!line) continue;
-      yield JSON.parse(line) as JsonRpcMessage;
+      const msg = parseMessageLine(line);
+      if (msg) {
+        yield msg;
+      } else {
+        opts.onParseError?.(line);
+      }
     }
   }
   const tail = buffer.trim();
-  if (tail) yield JSON.parse(tail) as JsonRpcMessage;
+  if (tail) {
+    const msg = parseMessageLine(tail);
+    if (msg) {
+      yield msg;
+    } else {
+      opts.onParseError?.(tail);
+    }
+  }
 }
 
 /** Writes a single JsonRpcMessage as a JSON line ending with \n. */

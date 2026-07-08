@@ -62,6 +62,19 @@ describe("runMcpServer error envelopes", () => {
     expect(parsed.error.message).toContain("nope");
   });
 
+  it("survives a malformed stdin line and still answers the next valid request", async () => {
+    const { stdin, stdout } = makeStreams();
+    const done = runMcpServer({ stdin, stdout, tools: [] });
+    stdin.write("{not json\n");
+    stdin.write('{"jsonrpc":"2.0","id":9,"method":"initialize","params":{}}\n');
+    const out = await collectFor(50, stdout);
+    stdin.end();
+    await done;
+    const parsed = JSON.parse(out.trim().split("\n")[0]);
+    expect(parsed.id).toBe(9);
+    expect(parsed.result.serverInfo.name).toBe("memex");
+  });
+
   it("returns -32603 when a tool handler throws", async () => {
     const { stdin, stdout } = makeStreams();
     const tools: ToolHandler[] = [{

@@ -33,13 +33,25 @@ describe("readMessages", () => {
     expect(out.length).toBe(1);
   });
 
-  it("throws on malformed JSON", async () => {
+  it("skips malformed JSON without throwing", async () => {
     const input = makeReadable(["{not json"]);
-    let err: unknown;
-    try {
-      for await (const _msg of readMessages(input)) { /* unused */ }
-    } catch (e) { err = e; }
-    expect(err).toBeInstanceOf(Error);
+    const errors: string[] = [];
+    const out: JsonRpcMessage[] = [];
+    for await (const msg of readMessages(input, { onParseError: (l) => errors.push(l) })) {
+      out.push(msg);
+    }
+    expect(out).toEqual([]);
+    expect(errors).toEqual(["{not json"]);
+  });
+
+  it("yields valid messages after a malformed line", async () => {
+    const input = makeReadable([
+      "{not json",
+      '{"jsonrpc":"2.0","id":1,"method":"initialize"}',
+    ]);
+    const out: JsonRpcMessage[] = [];
+    for await (const msg of readMessages(input)) out.push(msg);
+    expect(out).toEqual([{ jsonrpc: "2.0", id: 1, method: "initialize" }]);
   });
 });
 

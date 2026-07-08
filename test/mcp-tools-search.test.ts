@@ -59,6 +59,18 @@ describe("memex_search tool", () => {
     expect(index.search).not.toHaveBeenCalled();
   });
 
+  it("rounds relevance to ≤3 dp and omits best_query_index from agent payload", async () => {
+    const index: FakeIndex = {
+      search: vi.fn().mockResolvedValue([fakeResult("alpha", 0.6873707254997762)]),
+    };
+    const tool = makeSearchTool({ index: index as any, defaultTopK: 5, defaultThreshold: 0.5 });
+    const result = await tool.call({ query: "deploy" });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.results[0].relevance).toBe(0.687);
+    expect(String(parsed.results[0].relevance).split(".")[1]?.length ?? 0).toBeLessThanOrEqual(3);
+    expect(parsed.results[0]).not.toHaveProperty("best_query_index");
+  });
+
   it("generates a unique query_id per call", async () => {
     const index: FakeIndex = { search: vi.fn().mockResolvedValue([]) };
     const tool = makeSearchTool({ index: index as any, defaultTopK: 5, defaultThreshold: 0.5 });

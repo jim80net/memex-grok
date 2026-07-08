@@ -35,6 +35,8 @@ export interface Check {
   name: string;
   severity: Severity;
   message: string;
+  /** Design-expected advisory (D1/D3/D5) — grouped separately in text output. */
+  expectedByDesign?: boolean;
 }
 
 export interface DoctorReport {
@@ -86,8 +88,16 @@ export async function runDoctor(args: string[]): Promise<number> {
   if (json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
-    for (const c of report.checks) {
+    const primary = report.checks.filter((c) => !c.expectedByDesign);
+    const expected = report.checks.filter((c) => c.expectedByDesign);
+    for (const c of primary) {
       process.stdout.write(`${c.severity}: ${c.name} — ${c.message}\n`);
+    }
+    if (expected.length > 0) {
+      process.stdout.write("\n--- expected / by-design (healthy deploy) ---\n");
+      for (const c of expected) {
+        process.stdout.write(`${c.severity}: ${c.name} — ${c.message}\n`);
+      }
     }
   }
   return report.ok ? 0 : 1;
@@ -262,12 +272,14 @@ function checkSyncRepo(paths: GrokPaths): Check {
     return {
       name: "sync-repo",
       severity: "WARN",
+      expectedByDesign: true,
       message: `deferring to memex-claude repo at ${LEGACY_SYNC_REPO} (canonical-id migration pending; run doctor --migrate-repo)`,
     };
   }
   return {
     name: "sync-repo",
     severity: "WARN",
+    expectedByDesign: true,
     message: `not initialized (${paths.syncRepoDir}); it self-creates on first sync`,
   };
 }
@@ -275,7 +287,12 @@ function checkSyncRepo(paths: GrokPaths): Check {
 function checkConfig(paths: GrokPaths): Check {
   return existsSync(paths.configPath)
     ? { name: "config", severity: "OK", message: `present at ${paths.configPath}` }
-    : { name: "config", severity: "WARN", message: `no memex.json (${paths.configPath}); using defaults` };
+    : {
+        name: "config",
+        severity: "WARN",
+        expectedByDesign: true,
+        message: `no memex.json (${paths.configPath}); using defaults`,
+      };
 }
 
 function checkModel(paths: GrokPaths): Check {
@@ -297,6 +314,7 @@ function checkHooks(): Check {
   return {
     name: "hooks",
     severity: "WARN",
+    expectedByDesign: true,
     message: "grok hook injection is dormant by design (D1/D3) — MCP is the primary surface",
   };
 }

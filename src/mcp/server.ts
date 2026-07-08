@@ -22,7 +22,9 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
   const log = onError ?? ((m: string) => process.stderr.write(`memex-mcp: ${m}\n`));
   const byName = new Map(tools.map((t) => [t.name, t]));
 
-  for await (const msg of readMessages(stdin)) {
+  for await (const msg of readMessages(stdin, {
+    onParseError: (line) => log(`skipping malformed JSON-RPC line: ${line.slice(0, 120)}`),
+  })) {
     try {
       await dispatch(msg);
     } catch (e) {
