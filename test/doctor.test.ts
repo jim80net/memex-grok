@@ -38,7 +38,6 @@ function probes(over: Partial<DoctorProbes> = {}): DoctorProbes {
     readDeployStamp: () => STAMP_OK,
     readAvailableStamp: () => null,
     grokMcpServers: async () => ["memex-grok"],
-    grokMemexScopeCount: async () => 1,
     ...over,
   };
 }
@@ -92,28 +91,10 @@ describe("mcp-registration check (grok's primary surface)", () => {
     const r = await runChecks(fakePaths(), probes({ grokMcpServers: async () => ["other", "memex-grok"] }));
     expect(sev(r, "mcp-registration")).toBe("OK");
   });
-  it("grok present but memex NOT registered anywhere → FAIL", async () => {
-    const r = await runChecks(
-      fakePaths(),
-      probes({
-        grokMcpServers: async () => ["something-else"],
-        grokMemexScopeCount: async () => 0,
-      }),
-    );
+  it("grok present but memex NOT registered → FAIL", async () => {
+    const r = await runChecks(fakePaths(), probes({ grokMcpServers: async () => ["something-else"] }));
     expect(sev(r, "mcp-registration")).toBe("FAIL");
     expect(r.ok).toBe(false);
-  });
-  it("memex registered elsewhere but not cwd → WARN (not FAIL)", async () => {
-    const r = await runChecks(
-      fakePaths(),
-      probes({
-        grokMcpServers: async () => ["something-else"],
-        grokMemexScopeCount: async () => 2,
-      }),
-    );
-    expect(sev(r, "mcp-registration")).toBe("WARN");
-    expect(r.checks.find((c) => c.name === "mcp-registration")?.message).toMatch(/not in current cwd/);
-    expect(r.ok).toBe(true);
   });
 });
 

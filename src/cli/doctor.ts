@@ -118,11 +118,9 @@ export interface DoctorProbes {
   readDeployStamp: (paths: GrokPaths) => string | null;
   /** Latest local `dist/<platform>/.stamp` when present (dev workflow). */
   readAvailableStamp: (paths: GrokPaths) => string | null;
-  /** grok's registered MCP server ids in the current cwd project scope, or null
-   *  if the grok CLI is not installed / not inspectable on this host. */
+  /** grok's registered MCP server ids, or null if the grok CLI is not
+   *  installed / not inspectable on this host. */
   grokMcpServers: () => Promise<string[] | null>;
-  /** Scopes (user + project configs) where memex is registered; null if unscanable. */
-  grokMemexScopeCount: () => Promise<number | null>;
 }
 
 const defaultProbes: DoctorProbes = {
@@ -172,9 +170,6 @@ const defaultProbes: DoctorProbes = {
       }
     }
     return null;
-  },
-  async grokMemexScopeCount() {
-    return scanMemexRegistrationScopes();
   },
 };
 
@@ -259,25 +254,14 @@ async function checkMcpRegistration(probes: DoctorProbes): Promise<Check> {
       message: "grok CLI not found — cannot verify MCP registration (run on a grok host)",
     };
   }
-  const cwdHasMemex = servers.some((s) => /memex/i.test(s));
-  if (cwdHasMemex) {
-    return { name: "mcp-registration", severity: "OK", message: "memex MCP server registered with grok" };
-  }
-  const scopeCount = await probes.grokMemexScopeCount();
-  if (scopeCount != null && scopeCount > 0) {
-    const n = scopeCount === 1 ? "1 scope" : `${scopeCount} scopes`;
-    return {
-      name: "mcp-registration",
-      severity: "WARN",
-      message:
-        `memex registered in ${n} but not in current cwd — run doctor from your project dir or \`grok mcp add\` here`,
-    };
-  }
-  return {
-    name: "mcp-registration",
-    severity: "FAIL",
-    message: `memex MCP server not registered (grok knows in cwd: ${servers.join(", ") || "none"})`,
-  };
+  const registered = servers.some((s) => /memex/i.test(s));
+  return registered
+    ? { name: "mcp-registration", severity: "OK", message: "memex MCP server registered with grok" }
+    : {
+        name: "mcp-registration",
+        severity: "FAIL",
+        message: `memex MCP server not registered (grok knows: ${servers.join(", ") || "none"})`,
+      };
 }
 
 function checkSyncRepo(paths: GrokPaths): Check {
@@ -364,23 +348,6 @@ function extractServerIds(parsed: unknown): string[] {
     }
   }
   return [];
-}
-
-/** Count user + cwd project scopes where memex appears in grok MCP config. */
-function scanMemexRegistrationScopes(): number {
-  const seen = new Set<string>();
-  for (const path of [
-    join(homedir(), ".grok", "config.toml"),
-    join(process.cwd(), ".grok", "config.toml"),
-  ]) {
-    if (!existsSync(path)) continue;
-    try {
-      if (/memex/i.test(readFileSync(path, "utf8"))) seen.add(path);
-    } catch {
-      // unreadable config — skip
-    }
-  }
-  return seen.size;
 }
 
 function serverId(entry: unknown): string | null {
