@@ -56,9 +56,8 @@ export function makeSearchTool(deps: SearchDeps): ToolHandler {
           name: h.skill.name,
           type: h.skill.type,
           location: h.skill.location,
-          relevance: h.score,
+          relevance: roundRelevance(h.score),
           description: h.skill.description,
-          best_query_index: h.bestQueryIndex,
         })),
       };
       const text = JSON.stringify(payload, null, 2);
@@ -66,6 +65,11 @@ export function makeSearchTool(deps: SearchDeps): ToolHandler {
       return { content: [{ type: "text" as const, text }] };
     },
   };
+}
+
+/** Agent-facing relevance: 2–3 decimal places (no full float noise). */
+function roundRelevance(score: number): number {
+  return Math.round(score * 1000) / 1000;
 }
 
 function searchDescription(): string {

@@ -1,5 +1,6 @@
 import type { ScanRootRegistry, SkillIndex } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
+import { assertNoHostPathLeaks, scrubHostPaths } from "../core/host-path-egress.ts";
 import { assertAgentReadLocation } from "./location-handle.ts";
 
 export interface RecordMatchArgs {
@@ -64,7 +65,9 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
             /* telemetry is best-effort */
           }
         }
-        return { content: [{ type: "text" as const, text: content }] };
+        const scrubbed = scrubHostPaths(content);
+        assertNoHostPathLeaks(scrubbed);
+        return { content: [{ type: "text" as const, text: scrubbed }] };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         return { isError: true, content: [{ type: "text" as const, text: msg }] };

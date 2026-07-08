@@ -35,6 +35,8 @@ export interface Check {
   name: string;
   severity: Severity;
   message: string;
+  /** Design-expected advisory (D1/D3/D5) — grouped separately in text output. */
+  expectedByDesign?: boolean;
 }
 
 export interface DoctorReport {
@@ -86,8 +88,16 @@ export async function runDoctor(args: string[]): Promise<number> {
   if (json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
-    for (const c of report.checks) {
+    const primary = report.checks.filter((c) => !c.expectedByDesign);
+    const expected = report.checks.filter((c) => c.expectedByDesign);
+    for (const c of primary) {
       process.stdout.write(`${c.severity}: ${c.name} — ${c.message}\n`);
+    }
+    if (expected.length > 0) {
+      process.stdout.write("\n--- expected / by-design (healthy deploy) ---\n");
+      for (const c of expected) {
+        process.stdout.write(`${c.severity}: ${c.name} — ${c.message}\n`);
+      }
     }
   }
   return report.ok ? 0 : 1;
@@ -108,9 +118,11 @@ export interface DoctorProbes {
   readDeployStamp: (paths: GrokPaths) => string | null;
   /** Latest local `dist/<platform>/.stamp` when present (dev workflow). */
   readAvailableStamp: (paths: GrokPaths) => string | null;
-  /** grok's registered MCP server ids, or null if the grok CLI is not
-   *  installed / not inspectable on this host. */
+  /** grok's registered MCP server ids in the current cwd project scope, or null
+   *  if the grok CLI is not installed / not inspectable on this host. */
   grokMcpServers: () => Promise<string[] | null>;
+  /** Scopes (user + project configs) where memex is registered; null if unscanable. */
+  grokMemexScopeCount: () => Promise<number | null>;
 }
 
 const defaultProbes: DoctorProbes = {
@@ -160,6 +172,9 @@ const defaultProbes: DoctorProbes = {
       }
     }
     return null;
+  },
+  async grokMemexScopeCount() {
+    return scanMemexRegistrationScopes();
   },
 };
 
@@ -244,14 +259,25 @@ async function checkMcpRegistration(probes: DoctorProbes): Promise<Check> {
       message: "grok CLI not found — cannot verify MCP registration (run on a grok host)",
     };
   }
-  const registered = servers.some((s) => /memex/i.test(s));
-  return registered
-    ? { name: "mcp-registration", severity: "OK", message: "memex MCP server registered with grok" }
-    : {
-        name: "mcp-registration",
-        severity: "FAIL",
-        message: `memex MCP server not registered (grok knows: ${servers.join(", ") || "none"})`,
-      };
+  const cwdHasMemex = servers.some((s) => /memex/i.test(s));
+  if (cwdHasMemex) {
+    return { name: "mcp-registration", severity: "OK", message: "memex MCP server registered with grok" };
+  }
+  const scopeCount = await probes.grokMemexScopeCount();
+  if (scopeCount != null && scopeCount > 0) {
+    const n = scopeCount === 1 ? "1 scope" : `${scopeCount} scopes`;
+    return {
+      name: "mcp-registration",
+      severity: "WARN",
+      message:
+        `memex registered in ${n} but not in current cwd — run doctor from your project dir or \`grok mcp add\` here`,
+    };
+  }
+  return {
+    name: "mcp-registration",
+    severity: "FAIL",
+    message: `memex MCP server not registered (grok knows in cwd: ${servers.join(", ") || "none"})`,
+  };
 }
 
 function checkSyncRepo(paths: GrokPaths): Check {
@@ -262,12 +288,14 @@ function checkSyncRepo(paths: GrokPaths): Check {
     return {
       name: "sync-repo",
       severity: "WARN",
+      expectedByDesign: true,
       message: `deferring to memex-claude repo at ${LEGACY_SYNC_REPO} (canonical-id migration pending; run doctor --migrate-repo)`,
     };
   }
   return {
     name: "sync-repo",
     severity: "WARN",
+    expectedByDesign: true,
     message: `not initialized (${paths.syncRepoDir}); it self-creates on first sync`,
   };
 }
@@ -275,7 +303,12 @@ function checkSyncRepo(paths: GrokPaths): Check {
 function checkConfig(paths: GrokPaths): Check {
   return existsSync(paths.configPath)
     ? { name: "config", severity: "OK", message: `present at ${paths.configPath}` }
-    : { name: "config", severity: "WARN", message: `no memex.json (${paths.configPath}); using defaults` };
+    : {
+        name: "config",
+        severity: "WARN",
+        expectedByDesign: true,
+        message: `no memex.json (${paths.configPath}); using defaults`,
+      };
 }
 
 function checkModel(paths: GrokPaths): Check {
@@ -297,6 +330,7 @@ function checkHooks(): Check {
   return {
     name: "hooks",
     severity: "WARN",
+    expectedByDesign: true,
     message: "grok hook injection is dormant by design (D1/D3) — MCP is the primary surface",
   };
 }
@@ -330,6 +364,23 @@ function extractServerIds(parsed: unknown): string[] {
     }
   }
   return [];
+}
+
+/** Count user + cwd project scopes where memex appears in grok MCP config. */
+function scanMemexRegistrationScopes(): number {
+  const seen = new Set<string>();
+  for (const path of [
+    join(homedir(), ".grok", "config.toml"),
+    join(process.cwd(), ".grok", "config.toml"),
+  ]) {
+    if (!existsSync(path)) continue;
+    try {
+      if (/memex/i.test(readFileSync(path, "utf8"))) seen.add(path);
+    } catch {
+      // unreadable config — skip
+    }
+  }
+  return seen.size;
 }
 
 function serverId(entry: unknown): string | null {

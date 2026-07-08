@@ -38,6 +38,7 @@ function probes(over: Partial<DoctorProbes> = {}): DoctorProbes {
     readDeployStamp: () => STAMP_OK,
     readAvailableStamp: () => null,
     grokMcpServers: async () => ["memex-grok"],
+    grokMemexScopeCount: async () => 1,
     ...over,
   };
 }
@@ -91,10 +92,28 @@ describe("mcp-registration check (grok's primary surface)", () => {
     const r = await runChecks(fakePaths(), probes({ grokMcpServers: async () => ["other", "memex-grok"] }));
     expect(sev(r, "mcp-registration")).toBe("OK");
   });
-  it("grok present but memex NOT registered → FAIL", async () => {
-    const r = await runChecks(fakePaths(), probes({ grokMcpServers: async () => ["something-else"] }));
+  it("grok present but memex NOT registered anywhere → FAIL", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        grokMcpServers: async () => ["something-else"],
+        grokMemexScopeCount: async () => 0,
+      }),
+    );
     expect(sev(r, "mcp-registration")).toBe("FAIL");
     expect(r.ok).toBe(false);
+  });
+  it("memex registered elsewhere but not cwd → WARN (not FAIL)", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        grokMcpServers: async () => ["something-else"],
+        grokMemexScopeCount: async () => 2,
+      }),
+    );
+    expect(sev(r, "mcp-registration")).toBe("WARN");
+    expect(r.checks.find((c) => c.name === "mcp-registration")?.message).toMatch(/not in current cwd/);
+    expect(r.ok).toBe(true);
   });
 });
 
@@ -185,6 +204,17 @@ describe("deployed-binary drift check (#14)", () => {
     );
     expect(sev(r, "deployed-binary")).toBe("WARN");
     expect(r.checks.find((c) => c.name === "deployed-binary")?.message).toContain(".stamp");
+  });
+});
+
+describe("expected-by-design WARN grouping (#26)", () => {
+  it("marks sync-repo/config/hooks WARNs as expectedByDesign", async () => {
+    const r = await runChecks(fakePaths(), probes());
+    for (const name of ["sync-repo", "config", "hooks"]) {
+      const c = r.checks.find((x) => x.name === name);
+      expect(c?.severity).toBe("WARN");
+      expect(c?.expectedByDesign).toBe(true);
+    }
   });
 });
 
