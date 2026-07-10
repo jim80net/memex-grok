@@ -21,10 +21,14 @@ export interface McpConfig {
 
 /**
  * Extension of SyncConfig that adds a local `repoDir` override for
- * grok-specific sync configuration (Plan 3+).
+ * grok-specific origin/sync configuration (maps to core OriginConfig.root /
+ * resolveOriginRoot explicit root — product default is ~/.memex).
  */
 export type GrokSyncConfig = SyncConfig & {
-  /** Local filesystem path for the sync repo (overrides default sync repo dir). */
+  /**
+   * Explicit origin root override (absolute or ~/…).
+   * When unset, core `resolveOriginRoot` walks ~/.memex → XDG → legacy-claude.
+   */
   repoDir?: string;
 };
 

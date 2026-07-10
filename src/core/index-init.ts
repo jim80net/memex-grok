@@ -7,13 +7,15 @@ import {
   getProjectSkillsDirs,
   getProjectRulesDirs,
 } from "./paths.ts";
+import { rulesProjectionActive } from "./projection.ts";
 
 /**
  * Build the ScanDirs handed to memex-core's SkillIndex for a given cwd.
  *
- * Plan 1: index local + project skill/rule dirs and (if present) the
- * sync repo as a read-only source. Plan 3 will add memoryDirs once
- * canonicalProjectId is available from memex-core.
+ * When rules projection is active (sync.enabled), harness rule dirs are the
+ * projection surface (symlinks into origin) — do not also append raw
+ * origin/rules (avoids double-indexing the same content). Skills still scan
+ * origin when present until skills projection lands.
  */
 export function buildScanDirs(cwd: string, config: GrokRouterConfig): ScanDirs {
   const paths = getGrokPaths();
@@ -28,11 +30,13 @@ export function buildScanDirs(cwd: string, config: GrokRouterConfig): ScanDirs {
   ];
 
   if (config.sync.enabled) {
+    // Prefer explicit repoDir; live origin resolution for MCP first-call is separate.
     const repoDir = config.sync.repoDir ?? paths.syncRepoDir;
     if (existsSync(join(repoDir, "skills"))) {
       skillDirs.push(join(repoDir, "skills"));
     }
-    if (existsSync(join(repoDir, "rules"))) {
+    // Rules: only append raw origin when projection is *not* the delivery path.
+    if (!rulesProjectionActive(config) && existsSync(join(repoDir, "rules"))) {
       ruleDirs.push(join(repoDir, "rules"));
     }
   }

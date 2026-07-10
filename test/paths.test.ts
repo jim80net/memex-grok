@@ -14,9 +14,10 @@ describe("getGrokPaths", () => {
     expect(p.sessionsDir).toBe(join("/tmp/fake-home", ".grok", "cache", "sessions"));
   });
 
-  it("defaults sync repo to ~/.local/share/memex", async () => {
+  it("defaults sync/origin product path to ~/.memex (core defaultOriginRoot)", async () => {
     const { getGrokPaths } = await import("../src/core/paths.ts");
-    expect(getGrokPaths().syncRepoDir).toBe(join("/tmp/fake-home", ".local", "share", "memex"));
+    // Live resolution uses resolveOriginRoot; this is only the product default.
+    expect(getGrokPaths().syncRepoDir).toBe(join("/tmp/fake-home", ".memex"));
   });
 
   it("exposes global skill and rule dirs under ~/.grok and ~/.claude", async () => {

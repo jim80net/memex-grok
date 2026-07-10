@@ -131,14 +131,29 @@ describe("mcp-registration check (grok's primary surface)", () => {
   });
 });
 
-describe("sync-repo check (coexistence/deferral)", () => {
+describe("shared-origin check (resolveOriginRoot)", () => {
   it("present → OK", async () => {
     const paths = fakePaths();
     mkdirSync(paths.syncRepoDir, { recursive: true });
-    expect(sev(await runChecks(paths, probes()), "sync-repo")).toBe("OK");
+    expect(sev(await runChecks(paths, probes()), "shared-origin")).toBe("OK");
   });
-  it("absent → WARN (self-initializes)", async () => {
-    expect(sev(await runChecks(fakePaths(), probes()), "sync-repo")).toBe("WARN");
+  it("absent → WARN (self-initializes / memex init)", async () => {
+    expect(sev(await runChecks(fakePaths(), probes()), "shared-origin")).toBe("WARN");
+  });
+});
+
+describe("rules-projection + memory-surface", () => {
+  it("projection idle when sync disabled", async () => {
+    const r = await runChecks(fakePaths(), probes());
+    expect(sev(r, "rules-projection")).toBe("OK");
+    expect(r.checks.find((c) => c.name === "rules-projection")?.message).toMatch(/idle/);
+  });
+
+  it("memory-surface points at MCP tools not inject", async () => {
+    const r = await runChecks(fakePaths(), probes());
+    expect(sev(r, "memory-surface")).toBe("OK");
+    expect(r.checks.find((c) => c.name === "memory-surface")?.message).toMatch(/MCP tools/);
+    expect(r.checks.find((c) => c.name === "memory-surface")?.message).toMatch(/not inject/);
   });
 });
 
@@ -222,9 +237,9 @@ describe("deployed-binary drift check (#14)", () => {
 });
 
 describe("expected-by-design WARN grouping (#26)", () => {
-  it("marks sync-repo/config/hooks WARNs as expectedByDesign", async () => {
+  it("marks shared-origin/config/hooks WARNs as expectedByDesign", async () => {
     const r = await runChecks(fakePaths(), probes());
-    for (const name of ["sync-repo", "config", "hooks"]) {
+    for (const name of ["shared-origin", "config", "hooks"]) {
       const c = r.checks.find((x) => x.name === name);
       expect(c?.severity).toBe("WARN");
       expect(c?.expectedByDesign).toBe(true);

@@ -1,3 +1,4 @@
+import { defaultOriginRoot } from "@jim80net/memex-core";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -5,6 +6,11 @@ export interface GrokPaths {
   cacheDir: string;
   modelsDir: string;
   sessionsDir: string;
+  /**
+   * Product-default origin path (`~/.memex` via core `defaultOriginRoot`).
+   * Runtime resolution uses `resolveOriginRoot` (see `src/core/projection.ts`)
+   * — do not treat this alone as the live origin when XDG/legacy paths exist.
+   */
   syncRepoDir: string;
   telemetryPath: string;
   configPath: string;
@@ -20,7 +26,8 @@ export function getGrokPaths(): GrokPaths {
     cacheDir,
     modelsDir: join(cacheDir, "models"),
     sessionsDir: join(cacheDir, "sessions"),
-    syncRepoDir: join(home, ".local", "share", "memex"),
+    // Product default from core; live origin via resolveOriginRoot at runtime.
+    syncRepoDir: defaultOriginRoot(home),
     telemetryPath: join(cacheDir, "memex-telemetry.json"),
     configPath: join(home, ".grok", "memex.json"),
     binaryCacheDir: join(home, ".cache", "memex-grok"),

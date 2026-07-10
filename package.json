@@ -20,7 +20,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@jim80net/memex-core": "^0.5.0",
+    "@jim80net/memex-core": "^0.6.0",
     "@huggingface/transformers": "^3.8.1"
   },
   "packageManager": "pnpm@9.15.0",
