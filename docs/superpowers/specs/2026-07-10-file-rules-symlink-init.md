@@ -1,7 +1,8 @@
 # memex-grok addendum — file-shaped rules via shared-origin symlinks
 
 **Date:** 2026-07-10  
-**Status:** design draft — **no implementation until this doc and memex-core’s shared-origin design pass memex gate**  
+**Status:** design gated (#30) + core `@jim80net/memex-core@0.6.0` freeze — **implementation in progress / adapter PR**  
+
 **Authority:** operator product steer + flotilla brief `file-rules-shared-origin-2026-07-10.md` (`flotilla-dispatch-c29001c1`)  
 **Parent design:** [`2026-05-25-memex-grok-design.md`](./2026-05-25-memex-grok-design.md) (D1 MCP-primary, D3 dormant hooks, D5/D6 sync safety)  
 **Core peer:** memex-core design `design/shared-origin-sync-profile.md` (**expected; may land in parallel** — grok **must not** invent a parallel origin layout)  

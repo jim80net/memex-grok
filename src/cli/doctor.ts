@@ -1,18 +1,23 @@
 // `memex doctor` — installation health report for the Grok adapter.
 //
-// Grok has no reliable hook injection (design D1/D3): the memex surfaces are the
-// filesystem-synced corpus + the MCP server. So doctor's critical checks are the
-// binary + MCP registration; the sync repo / config / model are advisory (they
-// self-initialise on first use); hooks are informational (dormant by design).
+// Grok has no reliable hook injection (design D1/D3): the memex surfaces are
+// shared-origin file rules (symlink projection) + the MCP server. Critical
+// checks: binary + MCP registration. Origin / projection / config / model are
+// advisory; hooks are informational (dormant by design). Memory = MCP tools
+// you call, not inject.
 //
 // Severity → exit code (cross-harness-integration spec): OK→0, WARN-only→0, any
 // FAIL→1. `--json` emits the structured report. Every check degrades gracefully:
 // a missing external tool (e.g. the `grok` CLI on a dev box) is a WARN ("cannot
 // verify"), NOT a crash — only a definitively-broken install is a FAIL.
 
+import {
+  legacyClaudeOriginRoot,
+  planProjection,
+  resolveOriginRoot,
+} from "@jim80net/memex-core";
 import { execFile } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -20,8 +25,13 @@ import {
   localBuildStampPath,
   normalizeStamp,
 } from "../core/build-stamp.ts";
+import { DEFAULT_CONFIG, loadConfig, type GrokRouterConfig } from "../core/config.ts";
 import { assertNoHostPathLeaks, scrubHostPaths } from "../core/host-path-egress.ts";
 import { type GrokPaths, getGrokPaths } from "../core/paths.ts";
+import {
+  buildGrokProjectionTargets,
+  isProjectionProfileSet,
+} from "../core/projection.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -44,10 +54,6 @@ export interface DoctorReport {
   checks: Check[];
 }
 
-// The legacy memex-claude sync repo; memex-grok defers to it until the canonical
-// project-id migration (design D5 / cross-harness coexistence).
-const LEGACY_SYNC_REPO = join(homedir(), ".local", "share", "memex-claude");
-
 // ---------------------------------------------------------------------------
 // Public
 // ---------------------------------------------------------------------------
@@ -57,14 +63,17 @@ const LEGACY_SYNC_REPO = join(homedir(), ".local", "share", "memex-claude");
 export async function runChecks(
   paths: GrokPaths = getGrokPaths(),
   probes: DoctorProbes = defaultProbes,
+  config: GrokRouterConfig = DEFAULT_CONFIG,
 ): Promise<DoctorReport> {
   const checks: Check[] = [
     await checkBinary(paths, probes),
     await checkDeployedBinary(paths, probes),
     await checkMcpRegistration(probes),
-    checkSyncRepo(paths),
+    await checkSharedOrigin(paths, config),
+    await checkRulesProjection(paths, config),
     checkConfig(paths),
     checkModel(paths),
+    checkMemorySurface(config),
     checkHooks(),
   ];
   const report: DoctorReport = { ok: !checks.some((c) => c.severity === "FAIL"), checks };
@@ -84,7 +93,8 @@ function sanitizeReport(report: DoctorReport): DoctorReport {
 
 export async function runDoctor(args: string[]): Promise<number> {
   const json = args.includes("--json");
-  const report = await runChecks();
+  const config = await loadConfig();
+  const report = await runChecks(getGrokPaths(), defaultProbes, config);
   if (json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
@@ -265,23 +275,131 @@ async function checkMcpRegistration(probes: DoctorProbes): Promise<Check> {
       };
 }
 
-function checkSyncRepo(paths: GrokPaths): Check {
-  if (existsSync(paths.syncRepoDir)) {
-    return { name: "sync-repo", severity: "OK", message: `present at ${paths.syncRepoDir}` };
-  }
-  if (existsSync(LEGACY_SYNC_REPO)) {
+/**
+ * Shared origin via core resolveOriginRoot (product default ~/.memex).
+ * Also honors explicit config.sync.repoDir and paths.syncRepoDir for tests/overrides.
+ * Name `shared-origin` supersedes legacy `sync-repo` check.
+ */
+async function checkSharedOrigin(paths: GrokPaths, config: GrokRouterConfig): Promise<Check> {
+  // Explicit adapter override (config or product-default path on GrokPaths).
+  const explicit = config.sync.repoDir ?? paths.syncRepoDir;
+  if (existsSync(explicit)) {
     return {
-      name: "sync-repo",
+      name: "shared-origin",
+      severity: "OK",
+      message: `present at ${explicit}`,
+    };
+  }
+
+  const resolved = await resolveOriginRoot({ root: config.sync.repoDir });
+  if (resolved.exists) {
+    const legacyLike = resolved.source === "legacy-claude" || resolved.source === "xdg";
+    const legacyNote = legacyLike
+      ? ` (source=${resolved.source}; product default is ~/.memex — consider migrate)`
+      : ` (source=${resolved.source})`;
+    return {
+      name: "shared-origin",
+      severity: legacyLike ? "WARN" : "OK",
+      expectedByDesign: legacyLike,
+      message: `present at ${resolved.root}${legacyNote}`,
+    };
+  }
+
+  const legacy = legacyClaudeOriginRoot();
+  if (existsSync(legacy)) {
+    return {
+      name: "shared-origin",
       severity: "WARN",
       expectedByDesign: true,
-      message: `deferring to memex-claude repo at ${LEGACY_SYNC_REPO} (canonical-id migration pending; run doctor --migrate-repo)`,
+      message: `deferring to memex-claude corpus at ${legacy} (run memex init / core migrateOriginToDefault)`,
+    };
+  }
+
+  return {
+    name: "shared-origin",
+    severity: "WARN",
+    expectedByDesign: true,
+    message: `not initialized (${resolved.root}); run memex init when sync.enabled`,
+  };
+}
+
+/**
+ * When sync profile is set, plan projection and report conflicts / missing links.
+ * Never clobbers; advisory only.
+ */
+async function checkRulesProjection(
+  paths: GrokPaths,
+  config: GrokRouterConfig,
+): Promise<Check> {
+  if (!isProjectionProfileSet(config)) {
+    return {
+      name: "rules-projection",
+      severity: "OK",
+      message: "projection idle (sync.enabled=false) — enable + memex init to link rules",
+    };
+  }
+
+  const resolved = await resolveOriginRoot({ root: config.sync.repoDir });
+  const originRoot = existsSync(config.sync.repoDir ?? paths.syncRepoDir)
+    ? (config.sync.repoDir ?? paths.syncRepoDir)
+    : resolved.root;
+
+  if (!existsSync(originRoot)) {
+    return {
+      name: "rules-projection",
+      severity: "WARN",
+      message: `profile set but origin missing (${originRoot}); run memex init`,
+    };
+  }
+
+  const targets = buildGrokProjectionTargets(process.cwd(), paths);
+  const plan = await planProjection(originRoot, targets, { relinkManaged: true });
+  if (plan.conflicts.length > 0) {
+    const sample = plan.conflicts
+      .slice(0, 3)
+      .map((c) => `${c.targetPath} (${c.reason})`)
+      .join("; ");
+    return {
+      name: "rules-projection",
+      severity: "WARN",
+      message: `${plan.conflicts.length} conflict(s) — real files not clobbered: ${sample}`,
+    };
+  }
+
+  const toLink = plan.links.filter((l) => l.action === "create" || l.action === "relink").length;
+  if (toLink > 0) {
+    return {
+      name: "rules-projection",
+      severity: "WARN",
+      message: `${toLink} rule link(s) pending — run memex init (origin ${originRoot})`,
+    };
+  }
+
+  const linked = plan.links.filter((l) => l.action === "noop").length;
+  return {
+    name: "rules-projection",
+    severity: "OK",
+    message:
+      linked > 0
+        ? `${linked} rule link(s) point into origin`
+        : `origin ready; no rule files yet under ${join(originRoot, "rules")}`,
+  };
+}
+
+function checkMemorySurface(config: GrokRouterConfig): Check {
+  if (!config.mcp.enabled) {
+    return {
+      name: "memory-surface",
+      severity: "WARN",
+      message:
+        "mcp.enabled=false — memory should be MCP tools (memex_search / memex_read_skill / memex_status), not inject",
     };
   }
   return {
-    name: "sync-repo",
-    severity: "WARN",
-    expectedByDesign: true,
-    message: `not initialized (${paths.syncRepoDir}); it self-creates on first sync`,
+    name: "memory-surface",
+    severity: "OK",
+    message:
+      "memory = MCP tools you call (memex_search / memex_read_skill / memex_status), not inject",
   };
 }
 

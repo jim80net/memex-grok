@@ -19,8 +19,20 @@ describe("memex CLI", () => {
     expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
   });
 
-  it("exits 1 with a clear message for unimplemented subcommands", () => {
+  it("init is implemented (profile-off exits 0 with guidance)", () => {
+    const r = run(["init"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout + r.stderr).toMatch(/sync\.enabled=false|profile not set/i);
+  });
+
+  it("sync is implemented (profile-off exits 0 with guidance)", () => {
     const r = run(["sync"]);
+    expect(r.code).toBe(0);
+    expect(r.stdout + r.stderr).toMatch(/sync\.enabled=false|profile not set|enable/i);
+  });
+
+  it("exits 1 with a clear message for still-unimplemented subcommands", () => {
+    const r = run(["hook"]);
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("not yet implemented");
   });

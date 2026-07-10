@@ -7,12 +7,15 @@ const USAGE = `usage: memex <subcommand> [args]
 subcommands:
   mcp                Run the stdio MCP server (used by .mcp.json).
   doctor [--json]    Diagnose installation health.
+  init [--cwd PATH] [--strict] [--dry-run] [--json]
+                     Ensure origin + project ~/.grok/rules as origin symlinks.
+  sync [--cwd PATH] [--strict] [--dry-run] [--json]
+                     Pull origin (if remote) + re-project harness rules.
   --version, -v      Print version and exit.
 
-planned (not in Plan 1):
+planned (not in this chapter):
   hook               Hook dispatcher (Plan 2).
-  sync               One-shot sync pull/push (Plan 3).
-  index --rebuild    Force index rebuild (Plan 3).
+  index --rebuild    Force index rebuild (Plan 3 remainder).
 `;
 
 async function main(): Promise<number> {
@@ -35,7 +38,15 @@ async function main(): Promise<number> {
     const { runDoctor } = await import("./cli/doctor.ts");
     return runDoctor(argv.slice(1));
   }
-  if (sub === "hook" || sub === "sync" || sub === "index") {
+  if (sub === "init") {
+    const { runInit } = await import("./cli/init.ts");
+    return runInit(argv.slice(1));
+  }
+  if (sub === "sync") {
+    const { runSync } = await import("./cli/sync.ts");
+    return runSync(argv.slice(1));
+  }
+  if (sub === "hook" || sub === "index") {
     process.stderr.write(`memex: '${sub}' not yet implemented (deferred to a later plan)\n`);
     return 1;
   }

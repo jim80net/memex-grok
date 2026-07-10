@@ -56,4 +56,17 @@ describe("buildScanDirs", () => {
     const dirs = buildScanDirs("/work/repo", DEFAULT_CONFIG);
     expect(dirs.memoryDirs).toEqual([]);
   });
+
+  it("when projection active, does not double-scan origin/rules", async () => {
+    const syncDir = join(tmpHome, "syncrepo");
+    await mkdir(join(syncDir, "rules"), { recursive: true });
+    const cfg = {
+      ...DEFAULT_CONFIG,
+      sync: { ...DEFAULT_CONFIG.sync, enabled: true, repoDir: syncDir },
+    };
+    const { buildScanDirs } = await import("../src/core/index-init.ts");
+    const dirs = buildScanDirs("/work/repo", cfg);
+    expect(dirs.ruleDirs).not.toContain(join(syncDir, "rules"));
+    expect(dirs.ruleDirs).toContain(join(tmpHome, ".grok", "rules"));
+  });
 });
