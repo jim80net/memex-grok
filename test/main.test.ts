@@ -1,11 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 const ENTRY = ["tsx", "src/main.ts"];
+const EMPTY_CONFIG = join(tmpdir(), `memex-grok-test-missing-${process.pid}.json`);
 
 function run(args: string[]): { stdout: string; stderr: string; code: number } {
   try {
-    const stdout = execFileSync("npx", [...ENTRY, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    const stdout = execFileSync("npx", [...ENTRY, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, MEMEX_CONFIG: EMPTY_CONFIG },
+    });
     return { stdout, stderr: "", code: 0 };
   } catch (e: any) {
     return { stdout: String(e.stdout ?? ""), stderr: String(e.stderr ?? ""), code: e.status ?? 1 };
