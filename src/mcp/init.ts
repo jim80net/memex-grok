@@ -6,8 +6,11 @@ export class OnceInit<T> {
   private pending: Promise<T> | null = null;
   private done = false;
   private value: T | undefined;
+  private work: () => Promise<T>;
 
-  constructor(private work: () => Promise<T>) {}
+  constructor(work: () => Promise<T>) {
+    this.work = work;
+  }
 
   async ensure(): Promise<T> {
     if (this.done) return this.value as T;

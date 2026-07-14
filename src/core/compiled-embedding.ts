@@ -11,11 +11,16 @@ import * as transformers from "@huggingface/transformers";
 
 export class CompiledLocalEmbeddingProvider implements EmbeddingProvider {
   private extractorPromise: Promise<unknown> | null = null;
+  private model: string;
+  private cacheDir?: string;
 
   constructor(
-    private model: string = "Xenova/all-MiniLM-L6-v2",
-    private cacheDir?: string,
-  ) {}
+    model: string = "Xenova/all-MiniLM-L6-v2",
+    cacheDir?: string,
+  ) {
+    this.model = model;
+    this.cacheDir = cacheDir;
+  }
 
   async embed(texts: string[]): Promise<number[][]> {
     if (texts.length === 0) return [];

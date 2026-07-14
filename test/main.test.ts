@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -20,6 +20,39 @@ function run(args: string[]): { stdout: string; stderr: string; code: number } {
 }
 
 describe("memex CLI", () => {
+  it("parses and initializes MCP from source in Node strip-only mode", () => {
+    const initialize = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2024-11-05",
+        capabilities: {},
+        clientInfo: { name: "source-launch-test", version: "0" },
+      },
+    });
+    const result = spawnSync(
+      process.execPath,
+      ["--experimental-strip-types", "src/main.ts", "mcp"],
+      {
+        cwd: join(import.meta.dirname, ".."),
+        encoding: "utf8",
+        input: `${initialize}\n`,
+        timeout: 20_000,
+      },
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("parameter property");
+    const response = JSON.parse(result.stdout.trim()) as {
+      id?: number;
+      result?: { serverInfo?: { name?: string } };
+    };
+    expect(response.id).toBe(1);
+    expect(response.result?.serverInfo?.name).toBe("memex");
+  });
+
   it("prints version with --version", () => {
     const r = run(["--version"]);
     expect(r.code).toBe(0);
