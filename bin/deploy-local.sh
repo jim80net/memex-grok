@@ -27,6 +27,8 @@ PLATFORM="$(detect_platform)"
 SRC="${MEMEX_DEPLOY_SRC:-$ROOT/dist/$PLATFORM}"
 BIN_SRC="$SRC/memex"
 BIN_DEST="$INSTALL/memex-grok"
+BIN_PAYLOAD_SRC="$BIN_SRC.bin"
+BIN_PAYLOAD_DEST="$BIN_DEST.bin"
 STAMP_SRC="$SRC/.stamp"
 STAMP_DEST="$INSTALL/.stamp"
 
@@ -47,6 +49,10 @@ safe_replace_file() {
 mkdir -p "$INSTALL"
 safe_replace_file "$BIN_SRC" "$BIN_DEST"
 chmod +x "$BIN_DEST"
+if [ -f "$BIN_PAYLOAD_SRC" ]; then
+  safe_replace_file "$BIN_PAYLOAD_SRC" "$BIN_PAYLOAD_DEST"
+  chmod +x "$BIN_PAYLOAD_DEST"
+fi
 for lib in "$SRC"/*.so* "$SRC"/*.dylib "$SRC"/*.dll; do
   [ -f "$lib" ] || continue
   safe_replace_file "$lib" "$INSTALL/$(basename "$lib")"
