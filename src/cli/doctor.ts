@@ -434,7 +434,8 @@ function checkHooks(): Check {
     name: "hooks",
     severity: "WARN",
     expectedByDesign: true,
-    message: "grok hook injection is dormant by design (D1/D3) — MCP is the primary surface",
+    message:
+      "grok hook injection is dormant by design (grok has no prompt-hook surface; MCP tools are the primary interface)",
   };
 }
 

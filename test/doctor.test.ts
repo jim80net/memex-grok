@@ -253,6 +253,9 @@ describe("advisory checks never FAIL", () => {
     expect(sev(r, "config")).toBe("WARN");
     expect(sev(r, "embedding-model")).toBe("WARN");
     expect(sev(r, "hooks")).toBe("WARN");
+    expect(r.checks.find((check) => check.name === "hooks")?.message).toBe(
+      "grok hook injection is dormant by design (grok has no prompt-hook surface; MCP tools are the primary interface)",
+    );
   });
   it("config present → OK", async () => {
     const paths = fakePaths();
