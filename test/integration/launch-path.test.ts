@@ -39,9 +39,11 @@ const INITIALIZE = {
 };
 
 function spawnMcp(env: NodeJS.ProcessEnv = process.env): ChildProcessWithoutNullStreams {
+  const childEnv = { ...process.env, ...env };
+  delete childEnv.LD_LIBRARY_PATH;
   return spawn(BIN, ["mcp"], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...env, LD_LIBRARY_PATH: [DIST_DIR, process.env.LD_LIBRARY_PATH].filter(Boolean).join(":") },
+    env: childEnv,
   });
 }
 
@@ -130,7 +132,7 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     expect(resp.result?.serverInfo?.name).toBe("memex");
   });
 
-  it("memex_search returns real corpus hits via the compiled embedding backend (issue #4)", async () => {
+  it("memex_search loads the adjacent ONNX runtime without LD_LIBRARY_PATH (issues #4/#5)", async () => {
     const home = isolatedHome([join(SKILL_FIXTURE, "..")]);
     const child = spawnMcp({ HOME: home });
     const pending = readResponses(child, { wantId: 2, timeoutMs: 120_000 });

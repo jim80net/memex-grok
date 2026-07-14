@@ -2,9 +2,9 @@
 /**
  * Build script for memex-grok standalone binaries.
  *
- * Compiles src/main.ts into a self-contained executable via `bun build --compile`.
- * Sharp is stubbed (we only use text embeddings). The ONNX runtime shared library
- * is copied alongside the binary so the embedding model can load.
+ * Compiles src/main.ts into an executable via `bun build --compile`. Linux builds
+ * add a self-locating launcher so the untouched Bun payload can load the adjacent
+ * ONNX runtime library without caller-provided loader configuration.
  *
  * Embeddings: `src/core/compiled-embedding.ts` statically imports
  * `@huggingface/transformers` so bun traces it into the executable. memex-core's
@@ -14,7 +14,7 @@
  *   bun run build.ts                         # current platform
  *   bun run build.ts --target bun-linux-x64  # cross-compile
  */
-import { mkdirSync, cpSync, rmSync, symlinkSync, readlinkSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, cpSync, rmSync, symlinkSync, readlinkSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { platform, arch } from "node:os";
@@ -96,13 +96,23 @@ try {
   const buildStamp = formatBuildStamp(pkgVersion, gitShortSha());
   mkdirSync(outDir, { recursive: true });
   const outFile = join(outDir, platConfig.binaryName);
+  const compiledFile = platformKey.startsWith("linux-") ? `${outFile}.bin` : outFile;
   const defines = [
     `process.env.MEMEX_GROK_VERSION='"${pkgVersion}"'`,
     `process.env.MEMEX_GROK_BUILD_STAMP='"${buildStamp}"'`,
   ];
-  const args = ["build", "--compile", "src/main.ts", "--outfile", outFile, ...defines.flatMap((d) => ["--define", d])];
+  const args = ["build", "--compile", "src/main.ts", "--outfile", compiledFile, ...defines.flatMap((d) => ["--define", d])];
   if (targetFlag) args.push("--target", targetFlag);
   execSync(`bun ${args.join(" ")}`, { stdio: "inherit" });
+  if (platformKey.startsWith("linux-")) {
+    writeFileSync(
+      outFile,
+      `#!/bin/sh\nset -e\ncase "$0" in\n  */*) SELF="$0" ;;\n  *) SELF="$(command -v "$0")" ;;\nesac\nDIR="$(CDPATH= cd -- "$(dirname -- "$SELF")" && pwd)"\nNAME="$(basename -- "$SELF")"\nexport LD_LIBRARY_PATH="$DIR\${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"\nexec "$DIR/$NAME.bin" "$@"\n`,
+      "utf8",
+    );
+    chmodSync(outFile, 0o755);
+    console.log("  Runtime library launcher: self-locating");
+  }
   writeFileSync(join(outDir, ".stamp"), `${buildStamp}\n`, "utf8");
   console.log(`  Build stamp: ${buildStamp}`);
 

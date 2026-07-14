@@ -6,8 +6,8 @@
 > against the freshly built binary returns corpus hits (3 hits, deploy-sim from a
 > clean install dir). The first dogfood attempt (rolled back) failed because the
 > binary couldn't load its embedding backend; that is fixed. The steps below are
-> **corrected** — they now copy the onnx `.so` and set `LD_LIBRARY_PATH` (the two
-> deploy details the earlier attempt and the test harness masked).
+> **corrected** — deployment copies the onnx `.so` beside the executable payload,
+> and the entrypoint locates both without caller-provided loader configuration.
 
 **Status:** READY. Awaiting a fresh `grok-research`-idle window + family-office
 re-confirm (per their "re-confirm before touching grok-research, only after a
@@ -31,42 +31,33 @@ shared corpus. This is the first live consumption of memex on a Grok harness.
 
 ## Steps (corrected 2026-07-04 after the #4 fix)
 
-Two runtime deps the naive install misses — both required or `memex_search` fails:
-1. **`libonnxruntime.so.1` must sit in the install dir** (emitted next to the
-   binary by `pnpm build`; copy it too, not just the binary).
-2. **`LD_LIBRARY_PATH` must include the install dir** so the binary finds that
-   `.so` — pass it into the MCP registration via `-e` (the binary is not yet
-   self-locating; an `$ORIGIN` rpath would remove this — tracked follow-up).
+**`libonnxruntime.so.1` must sit in the install dir** beside the executable payload.
+Use `deploy-local.sh` so the entrypoint, payload, and runtime library stay together;
+the entrypoint self-locates them and requires no registration-time environment variable.
 
 ```sh
 # 0. Confirm grok-research is idle (family-office) before touching its config.
 GROK_CWD=<grok-research cwd>        # e.g. the desk's worktree root
 INSTALL="$HOME/.cache/memex-grok"
 
-# 1. Build and install BOTH the binary AND the onnx shared lib.
+# 1. Build and install the entrypoint, executable payload, and onnx shared lib.
 cd <memex-grok checkout>
 pnpm install --frozen-lockfile && pnpm build
-mkdir -p "$INSTALL"
-PLAT="$(node -e 'console.log(process.platform+"-"+process.arch)')"
-cp "dist/$PLAT/memex" "$INSTALL/memex-grok"
-cp "dist/$PLAT/libonnxruntime.so.1" "$INSTALL/"     # REQUIRED — do not skip
-chmod +x "$INSTALL/memex-grok"
+./bin/deploy-local.sh "$INSTALL"
 
-# 2. Register PROJECT-scope in grok-research's cwd (one-desk blast radius),
-#    with LD_LIBRARY_PATH so the embedding backend loads.
+# 2. Register PROJECT-scope in grok-research's cwd (one-desk blast radius).
 cd "$GROK_CWD"
-grok mcp add memex-grok -s project -e LD_LIBRARY_PATH="$INSTALL" \
-  "$INSTALL/memex-grok" mcp
+grok mcp add memex-grok -s project "$INSTALL/memex-grok" mcp
 
 # 3. Verify — handshake AND a real search (a discovered tool is not a working tool).
 grok mcp doctor                          # memex-grok ✓ handshake OK, ✓ 3 tools
-LD_LIBRARY_PATH="$INSTALL" "$INSTALL/memex-grok" doctor   # exit 0
+"$INSTALL/memex-grok" doctor             # exit 0
 # real search must return hits (this is the acceptance bar, not the handshake):
 printf '%s\n%s\n%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"p","version":"0"}}}' \
   '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
   '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memex_search","arguments":{"query":"standard development flow","threshold":0.3}}}' \
-  | LD_LIBRARY_PATH="$INSTALL" "$INSTALL/memex-grok" mcp   # expect results[] non-empty
+  | "$INSTALL/memex-grok" mcp   # expect results[] non-empty
 
 # 4. Dogfood: after family-office rotates grok-research's session, confirm it
 #    calls memex_search and gets hits (the live-consumption proof).
