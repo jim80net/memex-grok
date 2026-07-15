@@ -7,6 +7,7 @@ const USAGE = `usage: memex <subcommand> [args]
 subcommands:
   mcp                Run the stdio MCP server (used by .mcp.json).
   doctor [--json]    Diagnose installation health.
+  selfcheck [--json] Verify doctor, live MCP tools, security, and path egress.
   init [--cwd PATH] [--strict] [--dry-run] [--json]
                      Ensure origin + project ~/.grok/rules as origin symlinks.
   sync [--cwd PATH] [--strict] [--dry-run] [--json]
@@ -37,6 +38,10 @@ async function main(): Promise<number> {
   if (sub === "doctor") {
     const { runDoctor } = await import("./cli/doctor.ts");
     return runDoctor(argv.slice(1));
+  }
+  if (sub === "selfcheck") {
+    const { runSelfcheck } = await import("./cli/selfcheck.ts");
+    return runSelfcheck(argv.slice(1));
   }
   if (sub === "init") {
     const { runInit } = await import("./cli/init.ts");

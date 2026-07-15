@@ -25,7 +25,7 @@ shared corpus. This is the first live consumption of memex on a Grok harness.
 - Built binary handshakes with grok: `grok mcp doctor` → `✓ handshake OK
   (protocol 2024-11-05), ✓ 3 tools discovered` (isolated project scope).
 - `grok mcp add` is grok's native registration surface (grok 0.2.82).
-- `memex doctor` reports the six checks; green once binary is installed + MCP
+- `memex doctor` reports the installation checks; green once binary is installed + MCP
   registered.
 - Rollback (`grok mcp remove`) tested to cleanly deregister.
 
@@ -49,15 +49,9 @@ pnpm install --frozen-lockfile && pnpm build
 cd "$GROK_CWD"
 grok mcp add memex-grok -s project "$INSTALL/memex-grok" mcp
 
-# 3. Verify — handshake AND a real search (a discovered tool is not a working tool).
+# 3. Verify — registration plus the deployed binary's complete live loop.
 grok mcp doctor                          # memex-grok ✓ handshake OK, ✓ 3 tools
-"$INSTALL/memex-grok" doctor             # exit 0
-# real search must return hits (this is the acceptance bar, not the handshake):
-printf '%s\n%s\n%s\n' \
-  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"p","version":"0"}}}' \
-  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-  '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memex_search","arguments":{"query":"standard development flow","threshold":0.3}}}' \
-  | "$INSTALL/memex-grok" mcp   # expect results[] non-empty
+"$INSTALL/memex-grok" selfcheck          # doctor + search/read + security + path egress
 
 # 4. Dogfood: after family-office rotates grok-research's session, confirm it
 #    calls memex_search and gets hits (the live-consumption proof).

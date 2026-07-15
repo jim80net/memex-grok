@@ -6,4 +6,6 @@ queries:
   - ship memex changes
 ---
 
-Follow brainstorm, design, review trio, TDD, then PR.
+Follow brainstorm, design, review trio, TDD, then PR. Verify the built artifact through
+the same deployed entrypoint users invoke, exercise a real search and read round-trip,
+and keep security rejection plus path-egress checks in the acceptance gate.
