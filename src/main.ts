@@ -12,12 +12,59 @@ subcommands:
                      Ensure origin + project ~/.grok/rules as origin symlinks.
   sync [--cwd PATH] [--strict] [--dry-run] [--json]
                      Pull origin (if remote) + re-project harness rules.
+  --help, -h         Print this help and exit.
   --version, -v      Print version and exit.
 
 planned (not in this chapter):
   hook               Hook dispatcher (Plan 2).
   index --rebuild    Force index rebuild (Plan 3 remainder).
 `;
+
+type ArgContract = {
+  flags: ReadonlySet<string>;
+  valueFlags?: ReadonlySet<string>;
+};
+
+const SUBCOMMAND_ARGS: Readonly<Record<string, ArgContract>> = {
+  mcp: { flags: new Set() },
+  doctor: { flags: new Set(["--json"]) },
+  selfcheck: { flags: new Set(["--json"]) },
+  init: {
+    flags: new Set(["--strict", "--dry-run", "--json"]),
+    valueFlags: new Set(["--cwd"]),
+  },
+  sync: {
+    flags: new Set(["--strict", "--dry-run", "--json"]),
+    valueFlags: new Set(["--cwd"]),
+  },
+  hook: { flags: new Set() },
+  index: { flags: new Set(["--rebuild"]) },
+};
+
+function validateSubcommandArgs(subcommand: string, args: string[]): string | null {
+  const contract = SUBCOMMAND_ARGS[subcommand];
+  if (!contract) return null;
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (contract.flags.has(arg)) continue;
+    if (contract.valueFlags?.has(arg)) {
+      const value = args[index + 1];
+      if (!value || value.startsWith("-")) {
+        return `'${arg}' requires a value`;
+      }
+      index++;
+      continue;
+    }
+    const equals = arg.indexOf("=");
+    if (equals > 0 && contract.valueFlags?.has(arg.slice(0, equals))) {
+      if (equals === arg.length - 1) return `'${arg.slice(0, equals)}' requires a value`;
+      continue;
+    }
+    return `unsupported argument '${arg}'`;
+  }
+  return null;
+}
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
@@ -26,9 +73,26 @@ async function main(): Promise<number> {
     return 1;
   }
   const sub = argv[0];
+  if (sub === "--help" || sub === "-h") {
+    if (argv.length > 1) {
+      process.stderr.write(`memex: ${sub}: unsupported argument '${argv[1]}'\n`);
+      return 1;
+    }
+    process.stdout.write(USAGE);
+    return 0;
+  }
   if (sub === "--version" || sub === "-v") {
+    if (argv.length > 1) {
+      process.stderr.write(`memex: ${sub}: unsupported argument '${argv[1]}'\n`);
+      return 1;
+    }
     process.stdout.write(BUILD_STAMP + "\n");
     return 0;
+  }
+  const argumentError = validateSubcommandArgs(sub!, argv.slice(1));
+  if (argumentError) {
+    process.stderr.write(`memex: ${sub}: ${argumentError}\n`);
+    return 1;
   }
   if (sub === "mcp") {
     const { runMemexMcp } = await import("./mcp/main.ts");

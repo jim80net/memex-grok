@@ -59,6 +59,47 @@ describe("memex CLI", () => {
     expect(r.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
   });
 
+  it.each(["--help", "-h"])("prints usage and exits 0 for %s", (flag) => {
+    const r = run([flag]);
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("usage: memex <subcommand> [args]");
+    expect(r.stdout).toContain("selfcheck [--json]");
+    expect(r.stdout).toContain("--help, -h");
+    expect(r.stderr).toBe("");
+  });
+
+  it("rejects an unknown root subcommand with usage", () => {
+    const r = run(["nonsense"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("unknown subcommand 'nonsense'");
+    expect(r.stderr).toContain("usage: memex <subcommand> [args]");
+  });
+
+  it.each([
+    ["doctor", "unexpected"],
+    ["selfcheck", "--verbose"],
+    ["init", "unexpected"],
+    ["sync", "--unknown"],
+    ["mcp", "unexpected"],
+    ["hook", "unexpected"],
+    ["index", "unexpected"],
+    ["--help", "unexpected"],
+    ["--version", "unexpected"],
+  ])("rejects unsupported arguments for %s", (subcommand, argument) => {
+    const r = run([subcommand, argument]);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toBe("");
+    expect(r.stderr.trim()).toBe(
+      `memex: ${subcommand}: unsupported argument '${argument}'`,
+    );
+  });
+
+  it.each(["init", "sync"])("rejects a missing --cwd value for %s", (subcommand) => {
+    const r = run([subcommand, "--cwd"]);
+    expect(r.code).toBe(1);
+    expect(r.stderr.trim()).toBe(`memex: ${subcommand}: '--cwd' requires a value`);
+  });
+
   it("init is implemented (profile-off exits 0 with guidance)", () => {
     const r = run(["init"]);
     expect(r.code).toBe(0);
