@@ -11,6 +11,19 @@ Grok **cannot inject into the prompt from hook responses** (verified: `additiona
 
 Hooks are wired as dormant / best-effort warm-up only.
 
+## Self-verification
+
+After deployment, run the installed entrypoint to verify the complete memory path:
+
+```sh
+~/.cache/memex-grok/memex-grok selfcheck
+~/.cache/memex-grok/memex-grok selfcheck --json
+```
+
+`selfcheck` reuses the doctor checks, starts the same executable as an MCP server,
+performs a threshold-zero search and read round-trip, probes forbidden reads, and
+checks tool output for host-path leaks. It exits zero only when every step passes.
+
 ## Three-tier scope
 
 memex-core owns scope resolution; this adapter consumes it:

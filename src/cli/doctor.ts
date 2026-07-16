@@ -93,8 +93,7 @@ function sanitizeReport(report: DoctorReport): DoctorReport {
 
 export async function runDoctor(args: string[]): Promise<number> {
   const json = args.includes("--json");
-  const config = await loadConfig();
-  const report = await runChecks(getGrokPaths(), defaultProbes, config);
+  const report = await collectDoctorReport();
   if (json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
   } else {
@@ -111,6 +110,12 @@ export async function runDoctor(args: string[]): Promise<number> {
     }
   }
   return report.ok ? 0 : 1;
+}
+
+/** Exact doctor report collector shared by `doctor` and `selfcheck`. */
+export async function collectDoctorReport(): Promise<DoctorReport> {
+  const config = await loadConfig();
+  return runChecks(getGrokPaths(), defaultProbes, config);
 }
 
 // ---------------------------------------------------------------------------
