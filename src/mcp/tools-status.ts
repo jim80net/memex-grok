@@ -24,7 +24,7 @@ export function makeStatusTool(deps: StatusDeps): ToolHandler {
     name: "memex_status",
     description:
       "Report memex installation state: index size, source counts by type, last sync time, and embedding model. Useful for the model to introspect whether memex_search is likely to be productive.",
-    inputSchema: { type: "object", properties: {}, required: [] },
+    inputSchema: { type: "object", properties: {}, required: [], additionalProperties: false },
     call: async () => {
       const stats = deps.getIndexStats();
       const payload = {

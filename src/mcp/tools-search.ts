@@ -37,6 +37,7 @@ export function makeSearchTool(deps: SearchDeps): ToolHandler {
         },
       },
       required: ["query"],
+      additionalProperties: false,
     },
     call: async (args: Record<string, unknown>) => {
       const query = typeof args.query === "string" ? args.query.trim() : "";

@@ -109,4 +109,42 @@ describe("runMemexMcp end-to-end", () => {
     const readResult = readLine.result as { content: Array<{ text: string }> };
     expect(readResult.content[0].text).toMatch(/Hello there/);
   }, 60000);
+
+  it("enforces every tool schema through production wiring without weakening security rejection", async () => {
+    const stdin = new PassThroughStream();
+    const stdout = new PassThroughStream();
+    const { runMemexMcp } = await import("../src/mcp/main.ts");
+    const done = runMemexMcp({ stdin, stdout, cwd: "/work" });
+    const chunks: Buffer[] = [];
+    stdout.on("data", (chunk) => chunks.push(chunk as Buffer));
+
+    stdin.write("{not json\n");
+    stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n');
+    stdin.write('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"memex_search","arguments":{"query":"hello","top_k":0}}}\n');
+    stdin.write('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"memex_status","arguments":{"extra":true}}}\n');
+    stdin.write('{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"memex_read_skill","arguments":{"name":"hello","query_id":4}}}\n');
+    stdin.write('{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"memex_read_skill","arguments":{"location":"/etc/shadow"}}}\n');
+
+    await waitForRpcResponse(stdout, chunks, 5);
+    stdin.end();
+    await done;
+
+    const responses = Buffer.concat(chunks).toString("utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const byId = new Map(responses.map((response) => [response.id, response]));
+    expect(byId.get(1)?.result.serverInfo.name).toBe("memex");
+    expect(byId.get(2)?.result).toEqual({
+      isError: true,
+      content: [{ type: "text", text: "arguments.top_k must be >= 1" }],
+    });
+    expect(byId.get(3)?.result).toEqual({
+      isError: true,
+      content: [{ type: "text", text: "arguments.extra is not allowed" }],
+    });
+    expect(byId.get(4)?.result).toEqual({
+      isError: true,
+      content: [{ type: "text", text: "arguments.query_id must be a string" }],
+    });
+    expect(byId.get(5)?.result.isError).toBe(true);
+    expect(byId.get(5)?.result.content[0].text).toBe("unrecognized location: /etc/shadow");
+  }, 30000);
 });

@@ -44,6 +44,7 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
         query_id: { type: "string", description: "The query_id from the memex_search call that surfaced this result." },
       },
       required: [],
+      additionalProperties: false,
     },
     call: async (args: Record<string, unknown>) => {
       const locationArg = typeof args.location === "string" ? args.location.trim() : "";

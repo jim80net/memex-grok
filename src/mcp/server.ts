@@ -1,10 +1,11 @@
 import type { Readable, Writable } from "node:stream";
 import { readMessages, writeMessage, type JsonRpcMessage } from "./framing.ts";
+import { isRecord, validateSchemaValue, type JsonSchema } from "./schema-validation.ts";
 
 export interface ToolHandler {
   name: string;
   description: string;
-  inputSchema: Record<string, unknown>;
+  inputSchema: JsonSchema;
   call: (args: Record<string, unknown>) => Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }>;
 }
 
@@ -53,13 +54,30 @@ export async function runMcpServer(opts: McpServerOptions): Promise<void> {
         tools: tools.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema })),
       });
     } else if (msg.method === "tools/call") {
-      const params = (msg.params ?? {}) as { name?: string; arguments?: Record<string, unknown> };
-      const tool = params.name ? byName.get(params.name) : undefined;
+      if (!isRecord(msg.params)) {
+        await replyError(msg.id, -32602, "tools/call params must be an object");
+        return;
+      }
+      const params = msg.params;
+      if (typeof params.name !== "string" || !params.name) {
+        await replyError(msg.id, -32602, "tools/call name must be a non-empty string");
+        return;
+      }
+      const tool = byName.get(params.name);
       if (!tool) {
         await replyError(msg.id, -32601, `unknown tool: ${params.name}`);
         return;
       }
-      const result = await tool.call(params.arguments ?? {});
+      const args = Object.hasOwn(params, "arguments") ? params.arguments : {};
+      const validationError = validateSchemaValue(tool.inputSchema, args);
+      if (validationError) {
+        await reply(msg.id, {
+          isError: true,
+          content: [{ type: "text", text: validationError }],
+        });
+        return;
+      }
+      const result = await tool.call(args as Record<string, unknown>);
       await reply(msg.id, result);
     } else if (msg.method !== undefined) {
       await replyError(msg.id, -32601, `unknown method: ${msg.method}`);
