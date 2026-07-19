@@ -13,7 +13,12 @@ describe("makeMemexTools", () => {
       index: { search: vi.fn(), readSkillContent: vi.fn() } as any,
       registry,
       getIndexStats: () => ({ size: 0, sourceCounts: {} }),
-      getLastSyncAt: () => null,
+      getSyncStatus: () => ({
+        state: "never_synced",
+        lastSyncAt: null,
+        lastAttemptAt: null,
+        summary: "Sync is enabled but has not run yet.",
+      }),
       recordMatch: () => {},
       sessionId: () => "s",
     });

@@ -7,7 +7,7 @@
 // false failure locally); CI builds first (see .github/workflows/ci.yml), so
 // the assertion runs for real. A broken build fails loudly in the build step.
 
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -260,6 +260,61 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     expect(Object.keys(payload.source_counts ?? {}).length).toBeGreaterThan(0);
     expect(Object.values(payload.source_counts ?? {}).reduce((a, b) => a + b, 0)).toBe(
       payload.index_size,
+    );
+    assertNoHostPathLeaks(status?.result?.content?.[0]?.text ?? "", home);
+  }, 130_000);
+
+  it("persists a real compiled-binary sync and reports its measured time (issue #38)", async () => {
+    const home = isolatedHome([join(SKILL_FIXTURE, "..")]);
+    const origin = join(home, "origin");
+    mkdirSync(join(origin, "rules"), { recursive: true });
+    writeFileSync(
+      join(home, ".grok", "memex.json"),
+      JSON.stringify({
+        skillDirs: [join(SKILL_FIXTURE, "..")],
+        sync: { enabled: true, repoDir: origin, autoPull: false },
+      }),
+    );
+
+    const before = Date.now();
+    const sync = spawnSync(BIN, ["sync", "--cwd", home], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: home },
+    });
+    expect(sync.status, sync.stderr).toBe(0);
+    expect(sync.stdout).toMatch(/sync-state: last successful sync recorded at/);
+
+    const child = spawnMcp({ HOME: home });
+    const pending = readResponses(child, { wantId: 2, timeoutMs: 120_000 });
+    child.stdin.write(`${JSON.stringify(INITIALIZE)}\n`);
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+    child.stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "tools/call",
+        params: { name: "memex_status", arguments: {} },
+      })}\n`,
+    );
+
+    const { responses, stderr } = await pending;
+    const status = responses.find((response) => response.id === 2) as {
+      error?: unknown;
+      result?: { content?: Array<{ text?: string }> };
+    };
+    expect(stderr).not.toMatch(/requires @huggingface\/transformers/);
+    expect(status?.error).toBeUndefined();
+    const payload = JSON.parse(status?.result?.content?.[0]?.text ?? "{}") as {
+      last_sync_at?: string | null;
+      last_sync_attempt_at?: string | null;
+      sync_state?: string;
+      sync_status?: string;
+    };
+    expect(payload.sync_state).toBe("synced");
+    expect(payload.last_sync_at).toBe(payload.last_sync_attempt_at);
+    expect(Date.parse(payload.last_sync_at ?? "")).toBeGreaterThanOrEqual(before);
+    expect(payload.sync_status).toBe(
+      `The last sync completed successfully at ${payload.last_sync_at}.`,
     );
     assertNoHostPathLeaks(status?.result?.content?.[0]?.text ?? "", home);
   }, 130_000);
