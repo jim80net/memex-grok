@@ -74,6 +74,36 @@ describe("durable sync state", () => {
     });
   });
 
+  it("serializes concurrent transitions without losing success or regressing attempt order", async () => {
+    const olderSuccess = "2026-07-19T04:00:00.000Z";
+    const newerFailure = "2026-07-19T05:00:00.000Z";
+    const paths = await Promise.all(
+      Array.from({ length: 100 }, () => temporaryStatePath()),
+    );
+
+    await Promise.all(paths.map(async (path) => {
+      await Promise.all([
+        recordSyncSuccess(path, olderSuccess),
+        recordSyncFailure(path, newerFailure),
+      ]);
+      await expect(loadSyncStatus(path, true)).resolves.toEqual({
+        state: "failed",
+        lastSyncAt: olderSuccess,
+        lastAttemptAt: newerFailure,
+        summary: `The last sync attempt failed at ${newerFailure}. The last successful sync was at ${olderSuccess}.`,
+      });
+    }));
+
+    const reversePath = await temporaryStatePath();
+    await recordSyncSuccess(reversePath, newerFailure);
+    await recordSyncFailure(reversePath, olderSuccess);
+    await expect(loadSyncStatus(reversePath, true)).resolves.toMatchObject({
+      state: "synced",
+      lastSyncAt: newerFailure,
+      lastAttemptAt: newerFailure,
+    });
+  });
+
   it("reports malformed durable state as unknown, not never synced", async () => {
     const path = await temporaryStatePath();
     await writeFile(path, "{not-json", "utf8");

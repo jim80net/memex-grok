@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { withFileLock } from "@jim80net/memex-core";
 
 export type SyncAttemptResult = "succeeded" | "failed";
 
@@ -144,31 +145,68 @@ async function writeSyncState(path: string, state: PersistedSyncState): Promise<
   }
 }
 
-async function readLastSuccess(path: string): Promise<string | null> {
+async function readPersistedSyncState(path: string): Promise<PersistedSyncState | null> {
   try {
-    const parsed = parsePersistedSyncState(JSON.parse(await readFile(path, "utf8")));
-    return parsed?.last_success_at ?? null;
+    return parsePersistedSyncState(JSON.parse(await readFile(path, "utf8")));
   } catch {
     return null;
   }
 }
 
-export async function recordSyncSuccess(path: string, at: string): Promise<void> {
-  if (!isTimestamp(at)) throw new Error("sync timestamp must be a valid date");
-  await writeSyncState(path, {
+function laterTimestamp(left: string | null, right: string | null): string | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function mergeSyncAttempt(
+  current: PersistedSyncState | null,
+  at: string,
+  result: SyncAttemptResult,
+): PersistedSyncState {
+  const lastSuccessAt = result === "succeeded"
+    ? laterTimestamp(current?.last_success_at ?? null, at)
+    : current?.last_success_at ?? null;
+  if (!current) {
+    return {
+      version: 1,
+      last_attempt_at: at,
+      last_attempt_result: result,
+      last_success_at: lastSuccessAt,
+    };
+  }
+
+  const currentTime = Date.parse(current.last_attempt_at);
+  const nextTime = Date.parse(at);
+  const nextIsLatest = nextTime > currentTime
+    || (nextTime === currentTime
+      && result === "failed"
+      && current.last_attempt_result !== "failed");
+  return {
     version: 1,
-    last_attempt_at: at,
-    last_attempt_result: "succeeded",
-    last_success_at: at,
+    last_attempt_at: nextIsLatest ? at : current.last_attempt_at,
+    last_attempt_result: nextIsLatest ? result : current.last_attempt_result,
+    last_success_at: lastSuccessAt,
+  };
+}
+
+async function recordSyncAttempt(
+  path: string,
+  at: string,
+  result: SyncAttemptResult,
+): Promise<void> {
+  if (!isTimestamp(at)) throw new Error("sync timestamp must be a valid date");
+  await mkdir(dirname(path), { recursive: true });
+  await withFileLock(path, async () => {
+    const current = await readPersistedSyncState(path);
+    await writeSyncState(path, mergeSyncAttempt(current, at, result));
   });
 }
 
+export async function recordSyncSuccess(path: string, at: string): Promise<void> {
+  await recordSyncAttempt(path, at, "succeeded");
+}
+
 export async function recordSyncFailure(path: string, at: string): Promise<void> {
-  if (!isTimestamp(at)) throw new Error("sync timestamp must be a valid date");
-  await writeSyncState(path, {
-    version: 1,
-    last_attempt_at: at,
-    last_attempt_result: "failed",
-    last_success_at: await readLastSuccess(path),
-  });
+  await recordSyncAttempt(path, at, "failed");
 }
