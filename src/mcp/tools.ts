@@ -4,13 +4,14 @@ import type { GrokRouterConfig } from "../core/config.ts";
 import { makeSearchTool } from "./tools-search.ts";
 import { makeReadSkillTool, type RecordMatchArgs } from "./tools-read.ts";
 import { makeStatusTool, type IndexStats } from "./tools-status.ts";
+import type { MeasuredSyncStatus } from "../core/sync-state.ts";
 
 export interface MemexToolsDeps {
   config: GrokRouterConfig;
   index: SkillIndex;
   registry: ScanRootRegistry;
   getIndexStats: () => IndexStats;
-  getLastSyncAt: () => string | null;
+  getSyncStatus: () => MeasuredSyncStatus | Promise<MeasuredSyncStatus>;
   recordMatch: (args: RecordMatchArgs) => void | Promise<void>;
   sessionId: () => string;
 }
@@ -37,7 +38,7 @@ export function makeMemexTools(deps: MemexToolsDeps): ToolHandler[] {
     makeStatusTool({
       config: deps.config,
       getIndexStats: deps.getIndexStats,
-      getLastSyncAt: deps.getLastSyncAt,
+      getSyncStatus: deps.getSyncStatus,
     }),
   ];
 }

@@ -17,6 +17,7 @@ import { OnceInit } from "./init.ts";
 import { buildGrokScanRootRegistry } from "./location-handle.ts";
 import { computeIndexStats } from "../core/index-stats.ts";
 import type { IndexStats } from "./tools-status.ts";
+import { loadSyncStatus, syncStatePath } from "../core/sync-state.ts";
 
 export interface RunMemexMcpOptions {
   stdin: Readable;
@@ -50,14 +51,13 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
 
   // Per-process session ID (no grok-supplied id in stdio MCP).
   const sessionId = `mcp-${process.pid}-${Date.now()}`;
-  const lastSyncAt: string | null = null; // Plan 3 wires real sync state.
-
   const tools = makeMemexTools({
     config,
     index,
     registry,
     getIndexStats: () => indexStats,
-    getLastSyncAt: () => lastSyncAt,
+    getSyncStatus: () =>
+      loadSyncStatus(syncStatePath(paths.cacheDir), config.sync.enabled),
     recordMatch: async ({ location, queryId, sessionId: sid }) => {
       try {
         await withFileLock(paths.telemetryPath, async () => {
