@@ -133,6 +133,8 @@ export interface DoctorProbes {
   readDeployStamp: (paths: GrokPaths) => string | null;
   /** Latest local `dist/<platform>/.stamp` when present (dev workflow). */
   readAvailableStamp: (paths: GrokPaths) => string | null;
+  /** Prove Git ordering between deployed and locally available build stamps. */
+  compareBuildStamps: (deployed: string, available: string) => Promise<BuildStampOrder>;
   /** grok's registered MCP server ids, or null if the grok CLI is not
    *  installed / not inspectable on this host. */
   grokMcpServers: () => Promise<string[] | null>;
@@ -170,6 +172,9 @@ const defaultProbes: DoctorProbes = {
   },
   readAvailableStamp(_paths) {
     return readStampFile(localBuildStampPath());
+  },
+  compareBuildStamps(deployed, available) {
+    return compareBuildStampOrder(deployed, available);
   },
   async grokMcpServers() {
     // grok's MCP registry surface; absent on a non-grok host → null (cannot verify).
@@ -223,10 +228,28 @@ async function checkDeployedBinary(paths: GrokPaths, probes: DoctorProbes): Prom
   }
 
   if (available && deployed !== available) {
+    const order = await probes.compareBuildStamps(deployed, available);
+    if (order === "available-newer") {
+      return {
+        name: "deployed-binary",
+        severity: "WARN",
+        message: `deployed ${deployed} is older than available ${available} — redeploy`,
+      };
+    }
+    if (order === "deployed-newer") {
+      return {
+        name: "deployed-binary",
+        severity: "OK",
+        message: `deployed ${deployed} is newer than local build ${available}; no redeploy needed`,
+      };
+    }
     return {
       name: "deployed-binary",
       severity: "WARN",
-      message: `deployed ${deployed} is stale, available ${available} — redeploy`,
+      message:
+        order === "unrelated"
+          ? `freshness unknown: deployed ${deployed} and local build ${available} have unrelated histories; not recommending redeploy`
+          : `freshness unknown: cannot prove ordering between deployed ${deployed} and local build ${available}; not recommending redeploy`,
     };
   }
 
@@ -454,6 +477,54 @@ function readStampFile(path: string): string | null {
     return normalizeStamp(readFileSync(path, "utf8"));
   } catch {
     return null;
+  }
+}
+
+export type BuildStampOrder =
+  | "equal"
+  | "deployed-newer"
+  | "available-newer"
+  | "unrelated"
+  | "unknown";
+
+/**
+ * Compare build stamps by Git ancestry. A differing stamp is never assumed to
+ * be fresher merely because it is local. Unknown or unrelated revisions stay
+ * non-actionable so doctor cannot recommend a downgrade (#42).
+ */
+export async function compareBuildStampOrder(
+  deployed: string,
+  available: string,
+  cwd: string = process.cwd(),
+): Promise<BuildStampOrder> {
+  if (deployed === available) return "equal";
+  const deployedRevision = buildStampRevision(deployed);
+  const availableRevision = buildStampRevision(available);
+  if (!deployedRevision || !availableRevision) return "unknown";
+
+  const deployedIsAncestor = await isGitAncestor(deployedRevision, availableRevision, cwd);
+  if (deployedIsAncestor === null) return "unknown";
+  if (deployedIsAncestor) return "available-newer";
+
+  const availableIsAncestor = await isGitAncestor(availableRevision, deployedRevision, cwd);
+  if (availableIsAncestor === null) return "unknown";
+  return availableIsAncestor ? "deployed-newer" : "unrelated";
+}
+
+function buildStampRevision(stamp: string): string | null {
+  const match = /\+([0-9a-f]{7,40})$/i.exec(stamp);
+  return match?.[1] ?? null;
+}
+
+async function isGitAncestor(ancestor: string, descendant: string, cwd: string): Promise<boolean | null> {
+  try {
+    await execFileAsync("git", ["merge-base", "--is-ancestor", ancestor, descendant], {
+      cwd,
+      timeout: 10_000,
+    });
+    return true;
+  } catch (error) {
+    return (error as { code?: number }).code === 1 ? false : null;
   }
 }
 
