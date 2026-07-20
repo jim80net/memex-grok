@@ -2,12 +2,13 @@
 // "Doctor command reports installation health"). Probes are injected so no test
 // shells out to a real grok/binary; severity→exit semantics are pinned.
 
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chdir } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
-import { type DoctorProbes, runChecks } from "../src/cli/doctor.ts";
+import { compareBuildStampOrder, type DoctorProbes, runChecks } from "../src/cli/doctor.ts";
 import type { GrokPaths } from "../src/core/paths.ts";
 
 const roots: string[] = [];
@@ -38,6 +39,7 @@ function probes(over: Partial<DoctorProbes> = {}): DoctorProbes {
     binaryStamp: async () => STAMP_OK,
     readDeployStamp: () => STAMP_OK,
     readAvailableStamp: () => null,
+    compareBuildStamps: async () => "unknown",
     grokMcpServers: async () => ["memex-grok"],
     ...over,
   };
@@ -207,20 +209,86 @@ describe("deployed-binary drift check (#14)", () => {
     expect(r.ok).toBe(true);
   });
 
-  it("deployed stamp differs from local build → WARN citing available", async () => {
+  it("older installed / newer source → WARN recommending redeploy", async () => {
     const r = await runChecks(
       fakePaths(),
       probes({
-        binaryStamp: async () => "0.1.0-alpha.0+deployed",
-        readDeployStamp: () => "0.1.0-alpha.0+deployed",
-        readAvailableStamp: () => "0.1.0-alpha.0+freshbuild",
+        binaryStamp: async () => "0.1.0-alpha.0+aaa1111",
+        readDeployStamp: () => "0.1.0-alpha.0+aaa1111",
+        readAvailableStamp: () => "0.1.0-alpha.0+bbb2222",
+        compareBuildStamps: async () => "available-newer",
       }),
     );
     expect(sev(r, "deployed-binary")).toBe("WARN");
     const msg = r.checks.find((c) => c.name === "deployed-binary")?.message ?? "";
-    expect(msg).toContain("0.1.0-alpha.0+deployed");
-    expect(msg).toContain("0.1.0-alpha.0+freshbuild");
-    expect(msg).toContain("available");
+    expect(msg).toContain("0.1.0-alpha.0+aaa1111");
+    expect(msg).toContain("0.1.0-alpha.0+bbb2222");
+    expect(msg).toContain("redeploy");
+  });
+
+  it("newer installed / older source → OK without downgrade advice (#42)", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        binaryStamp: async () => "0.1.0-alpha.0+bbb2222",
+        readDeployStamp: () => "0.1.0-alpha.0+bbb2222",
+        readAvailableStamp: () => "0.1.0-alpha.0+aaa1111",
+        compareBuildStamps: async () => "deployed-newer",
+      }),
+    );
+    expect(sev(r, "deployed-binary")).toBe("OK");
+    const msg = r.checks.find((c) => c.name === "deployed-binary")?.message ?? "";
+    expect(msg).toContain("newer than local build");
+    expect(msg).toContain("no redeploy needed");
+    expect(msg).not.toMatch(/stale|— redeploy/);
+  });
+
+  it("equal installed / source stamp → OK", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        binaryStamp: async () => STAMP_OK,
+        readDeployStamp: () => STAMP_OK,
+        readAvailableStamp: () => STAMP_OK,
+      }),
+    );
+    expect(sev(r, "deployed-binary")).toBe("OK");
+    expect(r.checks.find((c) => c.name === "deployed-binary")?.message).toContain("matches deployed binary");
+  });
+
+  it("unrelated installed / source stamps → WARN freshness unknown without redeploy advice", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        binaryStamp: async () => "0.1.0-alpha.0+aaa1111",
+        readDeployStamp: () => "0.1.0-alpha.0+aaa1111",
+        readAvailableStamp: () => "0.1.0-alpha.0+bbb2222",
+        compareBuildStamps: async () => "unrelated",
+      }),
+    );
+    expect(sev(r, "deployed-binary")).toBe("WARN");
+    const msg = r.checks.find((c) => c.name === "deployed-binary")?.message ?? "";
+    expect(msg).toContain("freshness unknown");
+    expect(msg).toContain("unrelated histories");
+    expect(msg).toContain("not recommending redeploy");
+    expect(msg).not.toMatch(/stale|— redeploy/);
+  });
+
+  it("unresolvable stamps → WARN freshness unknown without redeploy advice", async () => {
+    const r = await runChecks(
+      fakePaths(),
+      probes({
+        binaryStamp: async () => "0.1.0-alpha.0+missing",
+        readDeployStamp: () => "0.1.0-alpha.0+missing",
+        readAvailableStamp: () => "0.1.0-alpha.0+unknown",
+        compareBuildStamps: async () => "unknown",
+      }),
+    );
+    expect(sev(r, "deployed-binary")).toBe("WARN");
+    const msg = r.checks.find((c) => c.name === "deployed-binary")?.message ?? "";
+    expect(msg).toContain("cannot prove ordering");
+    expect(msg).toContain("not recommending redeploy");
+    expect(msg).not.toMatch(/stale|— redeploy/);
   });
 
   it("no marker and no local build stamp → WARN to record deploy stamp", async () => {
@@ -233,6 +301,44 @@ describe("deployed-binary drift check (#14)", () => {
     );
     expect(sev(r, "deployed-binary")).toBe("WARN");
     expect(r.checks.find((c) => c.name === "deployed-binary")?.message).toContain(".stamp");
+  });
+});
+
+describe("build-stamp Git ordering (#42)", () => {
+  it("proves equal, older/newer, and unrelated commit orderings", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "grok-doctor-order-"));
+    roots.push(repo);
+    const git = (...args: string[]) => {
+      const result = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    git("init", "-q");
+    git("config", "user.name", "Doctor Test");
+    git("config", "user.email", "doctor@example.invalid");
+    writeFileSync(join(repo, "state.txt"), "older\n");
+    git("add", "state.txt");
+    git("commit", "-qm", "older");
+    const older = git("rev-parse", "--short=7", "HEAD");
+    writeFileSync(join(repo, "state.txt"), "newer\n");
+    git("commit", "-qam", "newer");
+    const newer = git("rev-parse", "--short=7", "HEAD");
+    git("checkout", "--orphan", "unrelated");
+    git("rm", "-qf", "state.txt");
+    writeFileSync(join(repo, "other.txt"), "unrelated\n");
+    git("add", "other.txt");
+    git("commit", "-qm", "unrelated");
+    const unrelated = git("rev-parse", "--short=7", "HEAD");
+
+    expect(await compareBuildStampOrder(`0.1.0+${newer}`, `0.1.0+${newer}`, repo)).toBe("equal");
+    expect(await compareBuildStampOrder(`0.1.0+${older}`, `0.1.0+${newer}`, repo)).toBe("available-newer");
+    expect(await compareBuildStampOrder(`0.1.0+${newer}`, `0.1.0+${older}`, repo)).toBe("deployed-newer");
+    expect(await compareBuildStampOrder(`0.1.0+${newer}`, `0.1.0+${unrelated}`, repo)).toBe(
+      "unrelated",
+    );
+    expect(await compareBuildStampOrder("0.1.0+not-a-sha", `0.1.0+${newer}`, repo)).toBe(
+      "unknown",
+    );
   });
 });
 
