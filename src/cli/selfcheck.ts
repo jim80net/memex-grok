@@ -54,8 +54,13 @@ export interface SelfcheckOutput {
 
 const defaultDeps: SelfcheckDeps = {
   doctor: collectDoctorReport,
-  openMcp: async () => StdioMcpClient.open(resolveSelfMcpCommand()),
+  openMcp: openSelfMcpClient,
 };
+
+/** Open this exact source or installed entrypoint as its own stdio MCP server. */
+export async function openSelfMcpClient(): Promise<SelfcheckMcpClient> {
+  return StdioMcpClient.open(resolveSelfMcpCommand());
+}
 
 export async function performSelfcheck(
   deps: SelfcheckDeps = defaultDeps,
