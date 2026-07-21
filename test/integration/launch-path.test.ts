@@ -170,6 +170,77 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     expect(payload.results?.[0]?.location).toMatch(/^memex:\/\//);
   }, 130_000);
 
+  it("serves bounded human search/read inspection from the built binary (issue #50)", () => {
+    const home = isolatedHome([]);
+    const skills = join(home, "inspection-skills");
+    const skill = join(skills, "inspection-long-content");
+    mkdirSync(skill, { recursive: true });
+    const longBody = "Paging regression content. ".repeat(240);
+    writeFileSync(
+      join(skill, "SKILL.md"),
+      `---\nname: inspection-long-content\ndescription: A deliberately long inspection fixture with a compact searchable teaser.\n---\n\n# Inspection paging\n\n${longBody}\n`,
+    );
+    writeFileSync(
+      join(home, ".grok", "memex.json"),
+      JSON.stringify({ skillDirs: [skills] }),
+    );
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+    delete env.LD_LIBRARY_PATH;
+
+    const search = spawnSync(
+      BIN,
+      ["search", "--threshold", "0", "--top-k", "1", "inspection paging regression"],
+      { encoding: "utf8", env, timeout: 120_000 },
+    );
+    expect(search.error).toBeUndefined();
+    expect(search.status, search.stderr).toBe(0);
+    expect(search.stdout).toContain("1 result(s)");
+    expect(search.stdout).toContain("inspection-long-content [skill] relevance=");
+    expect(search.stdout).toContain("read: memex read 'memex://");
+    expect(search.stdout.split("\n").length).toBeLessThanOrEqual(6);
+    assertNoHostPathLeaks(search.stdout, home);
+
+    const read = spawnSync(BIN, ["read", "inspection-long-content"], {
+      encoding: "utf8",
+      env,
+      timeout: 120_000,
+    });
+    expect(read.error).toBeUndefined();
+    expect(read.status, read.stderr).toBe(0);
+    expect(read.stdout).toContain("page 1/4 (chars 1-2000 of");
+    expect(read.stdout).toContain("Continue: memex read 'inspection-long-content' --page 2");
+    expect(read.stdout).toContain("Full: memex read 'inspection-long-content' --full");
+    expect(read.stdout.length).toBeLessThan(2_500);
+    assertNoHostPathLeaks(read.stdout, home);
+
+    const raw = spawnSync(BIN, ["read", "inspection-long-content", "--raw"], {
+      encoding: "utf8",
+      env,
+      timeout: 120_000,
+    });
+    expect(raw.status, raw.stderr).toBe(0);
+    expect(raw.stdout).toContain(longBody.trim());
+    expect(raw.stdout.length).toBeGreaterThan(6_000);
+
+    const empty = spawnSync(BIN, ["search", "--threshold", "1", "no matching corpus entry"], {
+      encoding: "utf8",
+      env,
+      timeout: 120_000,
+    });
+    expect(empty.status, empty.stderr).toBe(0);
+    expect(empty.stdout).toBe('No results for "no matching corpus entry".\n');
+
+    const security = spawnSync(BIN, ["read", "/etc/shadow"], {
+      encoding: "utf8",
+      env,
+      timeout: 120_000,
+    });
+    expect(security.status).toBe(1);
+    expect(security.stderr).toContain("memex: read: unrecognized location");
+    expect(security.stdout).toBe("");
+    assertNoHostPathLeaks(security.stderr, home);
+  }, 620_000);
+
   it("search→read_skill round-trip via portable handle (issues #6/#7)", async () => {
     const home = isolatedHome([join(SKILL_FIXTURE, "..")]);
     const child = spawnMcp({ HOME: home });

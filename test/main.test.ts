@@ -64,6 +64,8 @@ describe("memex CLI", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("usage: memex <subcommand> [args]");
     expect(r.stdout).toContain("selfcheck [--json]");
+    expect(r.stdout).toContain("search [options] QUERY");
+    expect(r.stdout).toContain("read [options] NAME|HANDLE");
     expect(r.stdout).toContain("--help, -h");
     expect(r.stderr).toBe("");
   });
@@ -81,6 +83,8 @@ describe("memex CLI", () => {
     ["init", "unexpected"],
     ["sync", "--unknown"],
     ["mcp", "unexpected"],
+    ["search", "--unknown"],
+    ["read", "--unknown"],
     ["hook", "unexpected"],
     ["index", "unexpected"],
     ["--help", "unexpected"],

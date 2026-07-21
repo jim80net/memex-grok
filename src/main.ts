@@ -8,6 +8,10 @@ subcommands:
   mcp                Run the stdio MCP server (used by .mcp.json).
   doctor [--json]    Diagnose installation health.
   selfcheck [--json] Verify doctor, live MCP tools, security, and path egress.
+  search [options] QUERY
+                     Search memex with compact ranked rows (--raw for MCP JSON).
+  read [options] NAME|HANDLE
+                     Read bounded pages (--full or --raw for complete content).
   init [--cwd PATH] [--strict] [--dry-run] [--json]
                      Ensure origin + project ~/.grok/rules as origin symlinks.
   sync [--cwd PATH] [--strict] [--dry-run] [--json]
@@ -23,12 +27,23 @@ planned (not in this chapter):
 type ArgContract = {
   flags: ReadonlySet<string>;
   valueFlags?: ReadonlySet<string>;
+  allowPositionals?: boolean;
 };
 
 const SUBCOMMAND_ARGS: Readonly<Record<string, ArgContract>> = {
   mcp: { flags: new Set() },
   doctor: { flags: new Set(["--json"]) },
   selfcheck: { flags: new Set(["--json"]) },
+  search: {
+    flags: new Set(["--raw", "--help", "-h"]),
+    valueFlags: new Set(["--top-k", "--threshold", "--type"]),
+    allowPositionals: true,
+  },
+  read: {
+    flags: new Set(["--raw", "--full", "--help", "-h"]),
+    valueFlags: new Set(["--page", "--page-size"]),
+    allowPositionals: true,
+  },
   init: {
     flags: new Set(["--strict", "--dry-run", "--json"]),
     valueFlags: new Set(["--cwd"]),
@@ -61,6 +76,7 @@ function validateSubcommandArgs(subcommand: string, args: string[]): string | nu
       if (equals === arg.length - 1) return `'${arg.slice(0, equals)}' requires a value`;
       continue;
     }
+    if (contract.allowPositionals && !arg.startsWith("-")) continue;
     return `unsupported argument '${arg}'`;
   }
   return null;
@@ -106,6 +122,14 @@ async function main(): Promise<number> {
   if (sub === "selfcheck") {
     const { runSelfcheck } = await import("./cli/selfcheck.ts");
     return runSelfcheck(argv.slice(1));
+  }
+  if (sub === "search") {
+    const { runSearch } = await import("./cli/inspect.ts");
+    return runSearch(argv.slice(1));
+  }
+  if (sub === "read") {
+    const { runRead } = await import("./cli/inspect.ts");
+    return runRead(argv.slice(1));
   }
   if (sub === "init") {
     const { runInit } = await import("./cli/init.ts");

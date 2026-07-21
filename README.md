@@ -24,6 +24,23 @@ After deployment, run the installed entrypoint to verify the complete memory pat
 performs a threshold-zero search and read round-trip, probes forbidden reads, and
 checks tool output for host-path leaks. It exits zero only when every step passes.
 
+## Operator inspection
+
+The installed CLI provides a compact human view over the same MCP tools without
+changing their JSON-RPC contract:
+
+```sh
+~/.cache/memex-grok/memex-grok search --threshold 0 "standard development flow"
+~/.cache/memex-grok/memex-grok read standard-development-flow
+~/.cache/memex-grok/memex-grok read standard-development-flow --page 2
+~/.cache/memex-grok/memex-grok read standard-development-flow --full
+```
+
+Search descriptions are normalized to bounded one-line teasers. Reads default to
+2,000-character pages (configurable from 200–4,000 with `--page-size`) and print
+an explicit continuation command. Use `search --raw` for the unchanged MCP search
+JSON or `read --raw` for exact full MCP content.
+
 ## Three-tier scope
 
 memex-core owns scope resolution; this adapter consumes it:
