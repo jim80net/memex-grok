@@ -196,7 +196,7 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     expect(search.status, search.stderr).toBe(0);
     expect(search.stdout).toContain("1 result(s)");
     expect(search.stdout).toContain("inspection-long-content [skill] relevance=");
-    expect(search.stdout).toContain('read: memex read "memex://');
+    expect(search.stdout).toContain("read: memex read 'memex://");
     expect(search.stdout.split("\n").length).toBeLessThanOrEqual(6);
     assertNoHostPathLeaks(search.stdout, home);
 
@@ -208,8 +208,8 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     expect(read.error).toBeUndefined();
     expect(read.status, read.stderr).toBe(0);
     expect(read.stdout).toContain("page 1/4 (chars 1-2000 of");
-    expect(read.stdout).toContain('Continue: memex read "inspection-long-content" --page 2');
-    expect(read.stdout).toContain('Full: memex read "inspection-long-content" --full');
+    expect(read.stdout).toContain("Continue: memex read 'inspection-long-content' --page 2");
+    expect(read.stdout).toContain("Full: memex read 'inspection-long-content' --full");
     expect(read.stdout.length).toBeLessThan(2_500);
     assertNoHostPathLeaks(read.stdout, home);
 

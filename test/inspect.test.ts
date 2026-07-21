@@ -1,10 +1,13 @@
+import { execFileSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   parseReadArgs,
   parseSearchArgs,
   renderRead,
+  renderSearch,
   runRead,
   runSearch,
+  shellQuote,
   type InspectDeps,
 } from "../src/cli/inspect.ts";
 import type { McpToolResult, SelfcheckMcpClient } from "../src/cli/selfcheck.ts";
@@ -81,7 +84,7 @@ describe("operator-readable inspection", () => {
     });
     expect(stdout.value()).toContain('2 result(s) for "standard flow" — query q-123');
     expect(stdout.value()).toContain("1. sync-main [workflow] relevance=0.449");
-    expect(stdout.value()).toContain('read: memex read "memex://claude-global/sync-main/SKILL.md"');
+    expect(stdout.value()).toContain("read: memex read 'memex://claude-global/sync-main/SKILL.md'");
     const teaser = stdout.value().split("\n")[2]!.trim();
     expect(teaser).not.toContain("\n");
     expect(teaser.length).toBeLessThanOrEqual(120);
@@ -123,8 +126,8 @@ describe("operator-readable inspection", () => {
     expect(code).toBe(0);
     expect(fake.callTool).toHaveBeenCalledWith("memex_read_skill", { name: "long-skill" });
     expect(stdout.value()).toContain("long-skill — page 1/3 (chars 1-2000 of 5000)");
-    expect(stdout.value()).toContain('Continue: memex read "long-skill" --page 2 --page-size 2000');
-    expect(stdout.value()).toContain('Full: memex read "long-skill" --full');
+    expect(stdout.value()).toContain("Continue: memex read 'long-skill' --page 2 --page-size 2000");
+    expect(stdout.value()).toContain("Full: memex read 'long-skill' --full");
     expect(stdout.value()).not.toContain(content);
   });
 
@@ -185,5 +188,51 @@ describe("operator-readable inspection", () => {
 
   it("renders an honest empty read state", () => {
     expect(renderRead(parseReadArgs(["empty"]), "")).toBe("empty — empty content\n");
+  });
+
+  it("prints corpus-controlled handles as literal POSIX shell arguments", () => {
+    const hostile = "memex://scope/a'$(printf EXPANDED)`printf ALSO_EXPANDED` $HOME skill.md";
+    const rendered = renderSearch("hostile", {
+      query_id: "q-hostile",
+      results: [{
+        name: "hostile",
+        type: "skill",
+        location: hostile,
+        relevance: 1,
+        description: "Hostile location fixture.",
+      }],
+    });
+    const command = rendered.split("\n").find((line) => line.includes("read: memex read"))!.trim().slice("read: ".length);
+    const roundTrip = execFileSync("/bin/sh", ["-c", `memex() { printf '%s' "$2"; }; ${command}`], { encoding: "utf8" });
+
+    expect(roundTrip).toBe(hostile);
+    expect(command).toContain(shellQuote(hostile));
+    expect(roundTrip).toContain("$(printf EXPANDED)");
+    expect(roundTrip).toContain("`printf ALSO_EXPANDED`");
+    expect(roundTrip).toContain("$HOME");
+  });
+
+  it("prints hostile continuation targets as literal POSIX shell arguments", () => {
+    const hostile = "name with ' quote $(printf EXPANDED) `printf ALSO_EXPANDED` $HOME";
+    const rendered = renderRead(parseReadArgs([hostile, "--page-size", "200"]), "x".repeat(401));
+    const command = rendered.split("\n").find((line) => line.startsWith("Continue: "))!.slice("Continue: ".length);
+    const roundTrip = execFileSync("/bin/sh", ["-c", `memex() { printf '%s' "$2"; }; ${command}`], { encoding: "utf8" });
+
+    expect(roundTrip).toBe(hostile);
+    expect(command).toContain(shellQuote(hostile));
+  });
+
+  it("pages by Unicode code points without splitting a non-BMP scalar", () => {
+    const content = `${"a".repeat(199)}😀b`;
+    const first = renderRead(parseReadArgs(["emoji", "--page-size", "200"]), content);
+    const second = renderRead(parseReadArgs(["emoji", "--page-size", "200", "--page", "2"]), content);
+
+    expect(first).toContain("page 1/2 (chars 1-200 of 201)");
+    expect(first).toContain(`${"a".repeat(199)}😀`);
+    expect(first).not.toContain("�");
+    expect(second).toContain("page 2/2 (chars 201-201 of 201)\n\nb\n");
+    expect(second).not.toContain("�");
+    expect(new TextDecoder().decode(new TextEncoder().encode(first))).toBe(first);
+    expect(new TextDecoder().decode(new TextEncoder().encode(second))).toBe(second);
   });
 });

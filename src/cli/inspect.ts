@@ -228,30 +228,37 @@ export function renderSearch(query: string, payload: SearchPayload): string {
   for (const [index, result] of payload.results.entries()) {
     lines.push(`${index + 1}. ${result.name} [${result.type}] relevance=${formatRelevance(result.relevance)}`);
     lines.push(`   ${boundedTeaser(result.description ?? "No description.")}`);
-    lines.push(`   read: memex read ${JSON.stringify(result.location)}`);
+    lines.push(`   read: memex read ${shellQuote(result.location)}`);
   }
   return `${lines.join("\n")}\n`;
 }
 
 export function renderRead(options: ReadOptions, content: string): string {
   if (content.length === 0) return `${options.target} — empty content\n`;
+  const codePoints = Array.from(content);
+  const contentLength = codePoints.length;
   if (options.full) {
-    return `${options.target} — full content (${content.length} chars)\n\n${terminated(content)}`;
+    return `${options.target} — full content (${contentLength} chars)\n\n${terminated(content)}`;
   }
-  const pages = Math.max(1, Math.ceil(content.length / options.pageSize));
+  const pages = Math.max(1, Math.ceil(contentLength / options.pageSize));
   if (options.page > pages) throw new Error(`page ${options.page} is past the last page (${pages})`);
   const start = (options.page - 1) * options.pageSize;
-  const end = Math.min(start + options.pageSize, content.length);
+  const end = Math.min(start + options.pageSize, contentLength);
   const lines = [
-    `${options.target} — page ${options.page}/${pages} (chars ${start + 1}-${end} of ${content.length})`,
+    `${options.target} — page ${options.page}/${pages} (chars ${start + 1}-${end} of ${contentLength})`,
     "",
-    content.slice(start, end),
+    codePoints.slice(start, end).join(""),
   ];
-  if (end < content.length) {
-    lines.push("", `Continue: memex read ${JSON.stringify(options.target)} --page ${options.page + 1} --page-size ${options.pageSize}`);
-    lines.push(`Full: memex read ${JSON.stringify(options.target)} --full`);
+  if (end < contentLength) {
+    lines.push("", `Continue: memex read ${shellQuote(options.target)} --page ${options.page + 1} --page-size ${options.pageSize}`);
+    lines.push(`Full: memex read ${shellQuote(options.target)} --full`);
   }
   return `${lines.join("\n")}\n`;
+}
+
+/** Encode one literal argument for POSIX shells without allowing expansion. */
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 function parseSearchPayload(text: string): SearchPayload {
