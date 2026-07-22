@@ -3,6 +3,8 @@ import type { SkillIndex, SkillType } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
 import { assertNoHostPathLeaks } from "../core/host-path-egress.ts";
 
+export const DEFAULT_MCP_SEARCH_TOP_K = 5;
+
 export interface SearchDeps {
   index: Pick<SkillIndex, "search">;
   defaultTopK: number;
@@ -25,7 +27,12 @@ export function makeSearchTool(deps: SearchDeps): ToolHandler {
       type: "object",
       properties: {
         query: { type: "string", description: "Natural-language query." },
-        top_k: { type: "integer", minimum: 1, maximum: 20, description: "Max results (default 5)." },
+        top_k: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20,
+          description: `Max results (default ${DEFAULT_MCP_SEARCH_TOP_K}).`,
+        },
         threshold: { type: "number", minimum: 0, maximum: 1, description: "Minimum cosine similarity (default 0.5)." },
         types: {
           type: "array",

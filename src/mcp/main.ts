@@ -40,7 +40,7 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const cachePath = join(paths.cacheDir, "memex-cache.json");
   const registry = buildGrokScanRootRegistry(cwd, config, paths);
   const index = new SkillIndex(config, provider, cachePath, { registry });
-  const scanDirs = buildScanDirs(cwd, config);
+  const scanDirs = buildScanDirs(cwd, config, paths);
 
   let indexStats: IndexStats = { size: 0, sourceCounts: {} };
 

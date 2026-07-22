@@ -6,6 +6,7 @@ import {
   getGrokPaths,
   getProjectSkillsDirs,
   getProjectRulesDirs,
+  type GrokPaths,
 } from "./paths.ts";
 import { rulesProjectionActive } from "./projection.ts";
 
@@ -17,8 +18,11 @@ import { rulesProjectionActive } from "./projection.ts";
  * origin/rules (avoids double-indexing the same content). Skills still scan
  * origin when present until skills projection lands.
  */
-export function buildScanDirs(cwd: string, config: GrokRouterConfig): ScanDirs {
-  const paths = getGrokPaths();
+export function buildScanDirs(
+  cwd: string,
+  config: GrokRouterConfig,
+  paths: GrokPaths = getGrokPaths(),
+): ScanDirs {
   const skillDirs: string[] = [
     ...paths.globalSkillsDirs,
     ...getProjectSkillsDirs(cwd),

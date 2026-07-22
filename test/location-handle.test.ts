@@ -12,7 +12,7 @@ import {
   buildGrokScanRootRegistry,
 } from "../src/mcp/location-handle.ts";
 import { DEFAULT_CONFIG } from "../src/core/config.ts";
-import { getGrokPaths } from "../src/core/paths.ts";
+import { getGrokPaths, type GrokPaths } from "../src/core/paths.ts";
 
 describe("buildGrokScanRootRegistry", () => {
   const home = homedir();
@@ -48,6 +48,21 @@ describe("buildGrokScanRootRegistry", () => {
     const handle = encodePortableLocation(registry, "/team/skills/deploy/SKILL.md");
     expect(handle).toBe(`memex://${key}/deploy/SKILL.md`);
     expect(decodePortableLocation(registry, handle!)).toBe("/team/skills/deploy/SKILL.md");
+  });
+
+  it("builds portable roots from the same injected paths used for scanning", () => {
+    const injectedPaths: GrokPaths = {
+      ...paths,
+      globalSkillsDirs: ["/embedded/.grok/skills", "/embedded/.claude/skills"],
+      globalRulesDirs: ["/embedded/.grok/rules"],
+    };
+
+    const registry = buildGrokScanRootRegistry(cwd, DEFAULT_CONFIG, injectedPaths);
+
+    expect(encodePortableLocation(registry, "/embedded/.grok/skills/foo/SKILL.md")).toBe(
+      "memex://grok-global/foo/SKILL.md",
+    );
+    expect(registry.some((root) => root.rootPath === join(home, ".grok", "skills"))).toBe(false);
   });
 });
 
