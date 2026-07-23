@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   parseReadArgs,
   parseSearchArgs,
+  paginateReadContent,
   renderRead,
   renderSearch,
   runRead,
@@ -234,5 +235,25 @@ describe("operator-readable inspection", () => {
     expect(second).not.toContain("�");
     expect(new TextDecoder().decode(new TextEncoder().encode(first))).toBe(first);
     expect(new TextDecoder().decode(new TextEncoder().encode(second))).toBe(second);
+  });
+
+  it("uses human boundaries while preserving every Unicode code point exactly once", () => {
+    const content = `${"word ".repeat(39)}😀boundary ${"tail ".repeat(60)}final`;
+    const pages = paginateReadContent(content, 200);
+
+    expect(pages[0]?.text.endsWith(" ")).toBe(true);
+    expect(pages[1]?.text.startsWith("😀boundary ")).toBe(true);
+    expect(pages.map((page) => page.text).join("")).toBe(content);
+    expect(pages.every((page, index) => index === 0 || page.start === pages[index - 1]!.end)).toBe(true);
+    expect(pages.every((page) => !page.text.includes("�"))).toBe(true);
+  });
+
+  it("falls back to safe hard boundaries for a token longer than the page size", () => {
+    const content = `${"😀".repeat(450)}`;
+    const pages = paginateReadContent(content, 200);
+
+    expect(pages.map((page) => [page.start, page.end])).toEqual([[0, 200], [200, 400], [400, 450]]);
+    expect(pages.map((page) => page.text).join("")).toBe(content);
+    expect(pages.every((page) => !page.text.includes("�"))).toBe(true);
   });
 });

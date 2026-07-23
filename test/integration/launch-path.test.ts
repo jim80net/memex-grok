@@ -119,6 +119,13 @@ function isolatedHome(skillDirs: string[]): string {
   return home;
 }
 
+function boundedReadBody(stdout: string): string {
+  const bodyStart = stdout.indexOf("\n\n");
+  if (bodyStart < 0) throw new Error(`bounded read has no body separator: ${stdout}`);
+  const continuation = stdout.indexOf("\n\nContinue:", bodyStart + 2);
+  return stdout.slice(bodyStart + 2, continuation >= 0 ? continuation : -1);
+}
+
 // Skips locally when unbuilt (CI builds first, so it always runs there). The
 // describe name carries the reason so a skipped line is self-explanatory.
 describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm build` first)", () => {
@@ -207,7 +214,7 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     });
     expect(read.error).toBeUndefined();
     expect(read.status, read.stderr).toBe(0);
-    expect(read.stdout).toContain("page 1/4 (chars 1-2000 of");
+    expect(read.stdout).toMatch(/page 1\/\d+ \(chars 1-\d+ of/);
     expect(read.stdout).toContain("Continue: memex read 'inspection-long-content' --page 2");
     expect(read.stdout).toContain("Full: memex read 'inspection-long-content' --full");
     expect(read.stdout.length).toBeLessThan(2_500);
@@ -221,6 +228,23 @@ describe.skipIf(!built)("built binary launch path (issue #3/#4 — run `pnpm bui
     expect(raw.status, raw.stderr).toBe(0);
     expect(raw.stdout).toContain(longBody.trim());
     expect(raw.stdout.length).toBeGreaterThan(6_000);
+
+    const totalPages = Number(read.stdout.match(/page 1\/(\d+)/)?.[1]);
+    expect(totalPages).toBeGreaterThan(1);
+    const boundedPages: string[] = [];
+    for (let page = 1; page <= totalPages; page++) {
+      const result = spawnSync(
+        BIN,
+        ["read", "inspection-long-content", "--page", String(page)],
+        { encoding: "utf8", env, timeout: 120_000 },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      boundedPages.push(boundedReadBody(result.stdout));
+    }
+    const concatenated = boundedPages.join("");
+    expect(concatenated.endsWith("\n") ? concatenated : `${concatenated}\n`).toBe(raw.stdout);
+    expect(boundedPages.slice(0, -1).every((page) => /\s$/u.test(page))).toBe(true);
+    expect(boundedPages.slice(1).every((page) => /^(Paging|regression|content\.)/u.test(page))).toBe(true);
 
     const empty = spawnSync(BIN, ["search", "--threshold", "1", "no matching corpus entry"], {
       encoding: "utf8",

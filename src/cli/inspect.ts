@@ -24,7 +24,7 @@ export const READ_USAGE = `usage: memex read [options] NAME|HANDLE
 
 options:
   --page N        Print page N (default 1).
-  --page-size N   Characters per page, 200–4000 (default 2000).
+  --page-size N   Target characters per page, 200–4000 (default 2000).
   --full          Print complete content with a human header.
   --raw           Print unchanged full MCP content only.
   --help, -h      Print this help and exit.
@@ -233,6 +233,48 @@ export function renderSearch(query: string, payload: SearchPayload): string {
   return `${lines.join("\n")}\n`;
 }
 
+export interface ReadPage {
+  /** Zero-based Unicode code-point offset, inclusive. */
+  start: number;
+  /** Zero-based Unicode code-point offset, exclusive. */
+  end: number;
+  text: string;
+}
+
+/**
+ * Split content into deterministic, lossless pages of Unicode code points.
+ *
+ * A page ends at the latest whitespace at or before its requested size so the
+ * next page begins with a whole word/line. The delimiter stays on the earlier
+ * page, making concatenation exact. A token longer than the requested size has
+ * no eligible delimiter and therefore uses the hard, Unicode-safe boundary.
+ */
+export function paginateReadContent(content: string, pageSize: number): ReadPage[] {
+  const codePoints = Array.from(content);
+  const pages: ReadPage[] = [];
+  let start = 0;
+
+  while (start < codePoints.length) {
+    const hardEnd = Math.min(start + pageSize, codePoints.length);
+    let end = hardEnd;
+    if (hardEnd < codePoints.length) {
+      let sawNonWhitespace = false;
+      let humanEnd: number | undefined;
+      for (let index = start; index < hardEnd; index++) {
+        if (/\s/u.test(codePoints[index]!)) {
+          if (sawNonWhitespace) humanEnd = index + 1;
+        } else {
+          sawNonWhitespace = true;
+        }
+      }
+      end = humanEnd ?? hardEnd;
+    }
+    pages.push({ start, end, text: codePoints.slice(start, end).join("") });
+    start = end;
+  }
+  return pages;
+}
+
 export function renderRead(options: ReadOptions, content: string): string {
   if (content.length === 0) return `${options.target} — empty content\n`;
   const codePoints = Array.from(content);
@@ -240,16 +282,17 @@ export function renderRead(options: ReadOptions, content: string): string {
   if (options.full) {
     return `${options.target} — full content (${contentLength} chars)\n\n${terminated(content)}`;
   }
-  const pages = Math.max(1, Math.ceil(contentLength / options.pageSize));
-  if (options.page > pages) throw new Error(`page ${options.page} is past the last page (${pages})`);
-  const start = (options.page - 1) * options.pageSize;
-  const end = Math.min(start + options.pageSize, contentLength);
+  const pages = paginateReadContent(content, options.pageSize);
+  if (options.page > pages.length) {
+    throw new Error(`page ${options.page} is past the last page (${pages.length})`);
+  }
+  const page = pages[options.page - 1]!;
   const lines = [
-    `${options.target} — page ${options.page}/${pages} (chars ${start + 1}-${end} of ${contentLength})`,
+    `${options.target} — page ${options.page}/${pages.length} (chars ${page.start + 1}-${page.end} of ${contentLength})`,
     "",
-    codePoints.slice(start, end).join(""),
+    page.text,
   ];
-  if (end < contentLength) {
+  if (page.end < contentLength) {
     lines.push("", `Continue: memex read ${shellQuote(options.target)} --page ${options.page + 1} --page-size ${options.pageSize}`);
     lines.push(`Full: memex read ${shellQuote(options.target)} --full`);
   }
