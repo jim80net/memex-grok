@@ -9,6 +9,7 @@
   },
   "type": "module",
   "scripts": {
+    "audit": "pnpm audit --audit-level low",
     "build": "bun run build.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -17,16 +18,27 @@
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.2.6"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@jim80net/memex-core": "^0.7.0"
+    "@jim80net/memex-core": "^0.7.1"
+  },
+  "overrides": {
+    "esbuild": "0.28.1",
+    "protobufjs": "7.6.5",
+    "sharp": "0.35.3",
+    "tar": "7.5.21",
+    "vite": "7.3.6"
   },
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
     "overrides": {
-      "sharp": "link:./stubs/sharp"
+      "esbuild": "0.28.1",
+      "protobufjs": "7.6.5",
+      "sharp": "0.35.3",
+      "tar": "7.5.21",
+      "vite": "7.3.6"
     }
   }
 }
