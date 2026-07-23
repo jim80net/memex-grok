@@ -3,6 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { DEFAULT_CONFIG } from "../src/core/config.ts";
+import type { GrokPaths } from "../src/core/paths.ts";
 
 describe("buildScanDirs", () => {
   let tmpHome: string;
@@ -68,5 +69,28 @@ describe("buildScanDirs", () => {
     const dirs = buildScanDirs("/work/repo", cfg);
     expect(dirs.ruleDirs).not.toContain(join(syncDir, "rules"));
     expect(dirs.ruleDirs).toContain(join(tmpHome, ".grok", "rules"));
+  });
+
+  it("uses injected global and sync paths consistently", async () => {
+    const injectedRoot = join(tmpHome, "injected");
+    const injectedPaths: GrokPaths = {
+      cacheDir: join(injectedRoot, "cache"),
+      modelsDir: join(injectedRoot, "models"),
+      sessionsDir: join(injectedRoot, "sessions"),
+      syncRepoDir: join(injectedRoot, "origin"),
+      telemetryPath: join(injectedRoot, "telemetry.json"),
+      configPath: join(injectedRoot, "memex.json"),
+      binaryCacheDir: join(injectedRoot, "bin"),
+      globalSkillsDirs: [join(injectedRoot, "grok-skills"), join(injectedRoot, "claude-skills")],
+      globalRulesDirs: [join(injectedRoot, "grok-rules")],
+    };
+    const { buildScanDirs } = await import("../src/core/index-init.ts");
+
+    const dirs = buildScanDirs("/work/repo", DEFAULT_CONFIG, injectedPaths);
+
+    expect(dirs.skillDirs).toEqual(expect.arrayContaining(injectedPaths.globalSkillsDirs));
+    expect(dirs.ruleDirs).toEqual(expect.arrayContaining(injectedPaths.globalRulesDirs));
+    expect(dirs.skillDirs).not.toContain(join(tmpHome, ".grok", "skills"));
+    expect(dirs.ruleDirs).not.toContain(join(tmpHome, ".grok", "rules"));
   });
 });

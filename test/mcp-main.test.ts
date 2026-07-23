@@ -16,10 +16,17 @@ async function waitForRpcResponse(
 ): Promise<JsonRpcLine> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const raw = Buffer.concat(chunks).toString("utf8").trim();
-    for (const line of raw.split("\n")) {
+    const raw = Buffer.concat(chunks).toString("utf8");
+    const completeLines = raw.split("\n");
+    if (!raw.endsWith("\n")) completeLines.pop();
+    for (const line of completeLines) {
       if (!line.trim()) continue;
-      const msg = JSON.parse(line) as JsonRpcLine;
+      let msg: JsonRpcLine;
+      try {
+        msg = JSON.parse(line) as JsonRpcLine;
+      } catch {
+        continue;
+      }
       if (msg.id === wantId && (msg.result !== undefined || msg.error !== undefined)) {
         return msg;
       }
@@ -28,6 +35,18 @@ async function waitForRpcResponse(
   }
   throw new Error(`timed out waiting for json-rpc id=${wantId}`);
 }
+
+describe("waitForRpcResponse", () => {
+  it("waits for a JSON-RPC line split across stream chunks", async () => {
+    const stdout = new PassThroughStream();
+    const chunks = [Buffer.from('{"jsonrpc":"2.0","id":9,"res')];
+    const pending = waitForRpcResponse(stdout, chunks, 9, 1_000);
+
+    setTimeout(() => chunks.push(Buffer.from('ult":{"ok":true}}\n')), 10);
+
+    await expect(pending).resolves.toEqual({ jsonrpc: "2.0", id: 9, result: { ok: true } });
+  });
+});
 
 describe("runMemexMcp end-to-end", () => {
   let tmpHome: string;

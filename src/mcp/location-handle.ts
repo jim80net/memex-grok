@@ -17,7 +17,7 @@ export function buildGrokScanRootRegistry(
   config: GrokRouterConfig,
   paths: GrokPaths = getGrokPaths(),
 ): ScanRootRegistry {
-  const scanDirs = buildScanDirs(cwd, config);
+  const scanDirs = buildScanDirs(cwd, config, paths);
   const registry = buildScanRoots(
     {
       cwd,
