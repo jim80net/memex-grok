@@ -11,7 +11,13 @@ const CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1";
 // Security-mitigated published-artifact baseline: memex-core@0.7.1.
 const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.7.1";
 const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.1";
-const APPLICATION_SHARP_OVERRIDE = "0.35.3";
+const APPLICATION_SECURITY_OVERRIDES = {
+  esbuild: "0.28.1",
+  protobufjs: "7.6.5",
+  sharp: "0.35.3",
+  tar: "7.5.21",
+  vite: "7.3.6",
+} as const;
 
 function readJson(relFromRepoRoot: string): Record<string, unknown> {
   const url = new URL(`../${relFromRepoRoot}`, import.meta.url);
@@ -61,11 +67,11 @@ describe("cross-adapter version-pin alignment (#4 / Tier 2)", () => {
       expect(depRange(grokPkg, "@huggingface/transformers")).toBe(coreRange);
     });
 
-    it("owns the Sharp security override at the accepted runtime version", () => {
+    it("owns the accepted dependency security overrides and Sharp runtime", () => {
       const pnpm = grokPkg.pnpm as { overrides?: Record<string, string> } | undefined;
-      expect(pnpm?.overrides?.sharp).toBe(APPLICATION_SHARP_OVERRIDE);
       const npmOverrides = grokPkg.overrides as Record<string, string> | undefined;
-      expect(npmOverrides?.sharp).toBe(APPLICATION_SHARP_OVERRIDE);
+      expect(pnpm?.overrides).toMatchObject(APPLICATION_SECURITY_OVERRIDES);
+      expect(npmOverrides).toMatchObject(APPLICATION_SECURITY_OVERRIDES);
 
       const rootRequire = createRequire(import.meta.url);
       const requireFromTransformers = createRequire(
@@ -75,7 +81,7 @@ describe("cross-adapter version-pin alignment (#4 / Tier 2)", () => {
       const installed = JSON.parse(
         readFileSync(join(dirname(sharpEntry), "..", "package.json"), "utf-8"),
       ) as Record<string, unknown>;
-      expect(installed.version).toBe(APPLICATION_SHARP_OVERRIDE);
+      expect(installed.version).toBe(APPLICATION_SECURITY_OVERRIDES.sharp);
     });
   });
 });

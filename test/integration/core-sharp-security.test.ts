@@ -20,32 +20,39 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-describe("Core 0.7.1 Sharp security contract", () => {
-  it("resolves exactly one Sharp 0.35.3 in the packaged runtime graph", async () => {
+describe("Core 0.7.1 dependency security contract", () => {
+  it("resolves one patched Sharp/tar/protobufjs production graph", async () => {
     const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
     const { stdout } = await execFileAsync(
       "pnpm",
-      ["list", "sharp", "--depth", "Infinity", "--json"],
+      ["list", "sharp", "tar", "protobufjs", "--prod", "--depth", "Infinity", "--json"],
       { cwd: repoRoot },
     );
     const graph = JSON.parse(stdout) as unknown;
-    const sharpNodes = new Map<string, string>();
+    const versions = new Map<string, Map<string, string>>([
+      ["sharp", new Map()],
+      ["tar", new Map()],
+      ["protobufjs", new Map()],
+    ]);
 
     function visit(value: unknown): void {
       if (!value || typeof value !== "object") return;
       const record = value as Record<string, unknown>;
       if (
-        record.from === "sharp" &&
+        typeof record.from === "string" &&
+        versions.has(record.from) &&
         typeof record.path === "string" &&
         typeof record.version === "string"
       ) {
-        sharpNodes.set(record.path, record.version);
+        versions.get(record.from)?.set(record.path, record.version);
       }
       for (const child of Object.values(record)) visit(child);
     }
 
     visit(graph);
-    expect([...sharpNodes.values()]).toEqual(["0.35.3"]);
+    expect([...versions.get("sharp")!.values()]).toEqual(["0.35.3"]);
+    expect([...versions.get("tar")!.values()]).toEqual(["7.5.21"]);
+    expect([...versions.get("protobufjs")!.values()]).toEqual(["7.6.5"]);
   });
 
   it("rejects the stock vulnerable Sharp graph before transformers native load", async () => {
