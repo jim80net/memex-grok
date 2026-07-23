@@ -14,7 +14,8 @@
  *   bun run build.ts                         # current platform
  *   bun run build.ts --target bun-linux-x64  # cross-compile
  */
-import { chmodSync, mkdirSync, cpSync, rmSync, symlinkSync, readlinkSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, cpSync, rmSync, symlinkSync, readlinkSync, existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { platform, arch } from "node:os";
@@ -41,7 +42,25 @@ function resolveOnnxBase(): string {
 }
 
 const ONNX_BASE = resolveOnnxBase();
-const SHARP_SYMLINK = "node_modules/.pnpm/@huggingface+transformers@3.8.1/node_modules/sharp";
+function resolveSharpSymlink(): string {
+  const rootRequire = createRequire(import.meta.url);
+  const requireFromTransformers = createRequire(
+    rootRequire.resolve("@huggingface/transformers"),
+  );
+  const candidates = (requireFromTransformers.resolve.paths("sharp") ?? [])
+    .map((searchPath) => join(searchPath, "sharp"));
+  const symlink = candidates.find(
+    (candidate) => existsSync(candidate) && lstatSync(candidate).isSymbolicLink(),
+  );
+  if (!symlink) {
+    throw new Error(
+      "Could not locate the pnpm Sharp dependency link for the compile-time image stub",
+    );
+  }
+  return symlink;
+}
+
+const SHARP_SYMLINK = resolveSharpSymlink();
 
 interface PlatformFiles { onnxDir: string; sharedLibs: string[]; binaryName: string; }
 

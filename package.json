@@ -21,12 +21,15 @@
   },
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@jim80net/memex-core": "^0.7.0"
+    "@jim80net/memex-core": "^0.7.1"
+  },
+  "overrides": {
+    "sharp": "0.35.3"
   },
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
     "overrides": {
-      "sharp": "link:./stubs/sharp"
+      "sharp": "0.35.3"
     }
   }
 }
