@@ -47,9 +47,10 @@ After rendering, record the screenshot-relative integer `x`, `y`, `size`, and
 }
 ```
 
-The marker belongs to neutral capture chrome, never product output. It must be a
-solid CSS block with integer dimensions; do not rely on a glyph or antialiased
-border.
+The marker belongs to neutral capture chrome, never product output. Each frame
+must declare exactly the two known probe kinds shown above—no extras. Markers
+must be fully opaque solid CSS blocks with integer dimensions; do not rely on a
+glyph, transparency, or an antialiased border.
 
 ## Gate
 
@@ -59,6 +60,7 @@ pnpm capture:check --json capture-clipping-manifest.json
 ```
 
 The command decodes the final PNG bytes and exits nonzero when a manifest, PNG,
-required marker contract, marker geometry, or any sentinel pixel is invalid.
+required marker contract, marker geometry, RGB value, alpha value, or any
+sentinel pixel is invalid.
 The aggregate may claim `no_material_clipping: true` only after this command
 passes every frame.

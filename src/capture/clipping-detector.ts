@@ -36,6 +36,7 @@ export interface RgbImage {
   width: number;
   height: number;
   pixels: Uint8Array;
+  alpha?: Uint8Array;
 }
 
 const PNG_SIGNATURE = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -61,7 +62,18 @@ export function inspectCaptureFrame(
     "secondary-prefix",
   ]);
   const kindCounts = new Map<CapturePrefixKind, number>();
+
+  if (contract.probes.length !== expectedKinds.size) {
+    errors.push(
+      `expected exactly ${expectedKinds.size} marker contracts, found ${contract.probes.length}`,
+    );
+  }
+
   for (const probe of contract.probes) {
+    if (!isCapturePrefixKind(probe.kind)) {
+      errors.push(`unknown marker kind '${String(probe.kind)}'`);
+      continue;
+    }
     kindCounts.set(probe.kind, (kindCounts.get(probe.kind) ?? 0) + 1);
   }
 
@@ -75,6 +87,7 @@ export function inspectCaptureFrame(
   }
 
   for (const probe of contract.probes) {
+    if (!isCapturePrefixKind(probe.kind)) continue;
     if (!Number.isInteger(probe.x) || !Number.isInteger(probe.y)) {
       errors.push(`${probe.kind}: marker coordinates must be integers`);
       continue;
@@ -231,12 +244,17 @@ export function decodePng(data: Uint8Array): RgbImage {
   }
 
   const pixels = new Uint8Array(width * height * 3);
-  for (let source = 0, target = 0; source < unfiltered.length; source += bytesPerPixel) {
-    pixels[target++] = unfiltered[source];
-    pixels[target++] = unfiltered[source + 1];
-    pixels[target++] = unfiltered[source + 2];
+  const alpha = colorType === 6 ? new Uint8Array(width * height) : undefined;
+  for (let source = 0, pixel = 0; source < unfiltered.length; source += bytesPerPixel, pixel += 1) {
+    const target = pixel * 3;
+    pixels[target] = unfiltered[source];
+    pixels[target + 1] = unfiltered[source + 1];
+    pixels[target + 2] = unfiltered[source + 2];
+    if (alpha !== undefined) alpha[pixel] = unfiltered[source + 3];
   }
-  return { width, height, pixels };
+  return alpha === undefined
+    ? { width, height, pixels }
+    : { width, height, pixels, alpha };
 }
 
 function countMarkerMismatches(
@@ -250,7 +268,8 @@ function countMarkerMismatches(
       if (
         image.pixels[offset] !== probe.rgb[0] ||
         image.pixels[offset + 1] !== probe.rgb[1] ||
-        image.pixels[offset + 2] !== probe.rgb[2]
+        image.pixels[offset + 2] !== probe.rgb[2] ||
+        (image.alpha !== undefined && image.alpha[y * image.width + x] !== 255)
       ) {
         mismatches += 1;
       }
@@ -264,6 +283,10 @@ function sameRgb(
   expected: readonly [number, number, number],
 ): boolean {
   return actual.every((component, index) => component === expected[index]);
+}
+
+function isCapturePrefixKind(value: unknown): value is CapturePrefixKind {
+  return value === "title-prefix" || value === "secondary-prefix";
 }
 
 function unfilterByte(

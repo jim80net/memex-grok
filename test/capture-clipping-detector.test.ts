@@ -10,6 +10,7 @@ import {
   inspectCaptureFrame,
   inspectCaptureManifest,
   type CaptureFrameContract,
+  type CaptureMarkerProbe,
   type CapturePrefixKind,
   type RgbImage,
 } from "../src/capture/clipping-detector.ts";
@@ -73,11 +74,32 @@ describe("capture clipping detector (#57)", () => {
     );
   });
 
+  it("rejects an unknown third runtime probe kind", () => {
+    const unknown = contract("unknown-kind.png");
+    unknown.probes.push({
+      ...unknown.probes[1],
+      kind: "unexpected-prefix",
+    } as unknown as CaptureMarkerProbe);
+    expect(inspectCaptureFrame(markedImage(new Set()), unknown).errors).toEqual([
+      "expected exactly 2 marker contracts, found 3",
+      "unknown marker kind 'unexpected-prefix'",
+    ]);
+  });
+
   it("decodes Chromium-style 8-bit RGB PNG pixels before checking markers", () => {
     const expected = markedImage(new Set());
     const decoded = decodePng(encodeRgbPng(expected));
     expect(decoded).toEqual(expected);
     expect(inspectCaptureFrame(decoded, contract("encoded.png")).ok).toBe(true);
+  });
+
+  it("rejects transparent RGBA sentinels even when their hidden RGB matches", () => {
+    const expected = markedImage(new Set());
+    const decoded = decodePng(encodeRgbaPng(expected, new Set([TITLE.kind])));
+    expect(decoded.alpha).toBeDefined();
+    expect(inspectCaptureFrame(decoded, contract("transparent-title.png")).errors).toEqual([
+      "title-prefix: 9/9 sentinel pixels missing",
+    ]);
   });
 
   it("rejects malformed PNG bytes instead of assuming unclipped", () => {
@@ -185,6 +207,53 @@ function encodeRgbPng(image: RgbImage): Uint8Array {
     chunk("IDAT", deflateSync(rows)),
     chunk("IEND", Buffer.alloc(0)),
   ]);
+}
+
+function encodeRgbaPng(
+  image: RgbImage,
+  transparent: Set<CapturePrefixKind>,
+): Uint8Array {
+  const rows = Buffer.alloc(image.height * (image.width * 4 + 1));
+  for (let y = 0; y < image.height; y += 1) {
+    const row = y * (image.width * 4 + 1);
+    rows[row] = 0;
+    for (let x = 0; x < image.width; x += 1) {
+      const source = (y * image.width + x) * 3;
+      const target = row + 1 + x * 4;
+      rows[target] = image.pixels[source];
+      rows[target + 1] = image.pixels[source + 1];
+      rows[target + 2] = image.pixels[source + 2];
+      rows[target + 3] =
+        (transparent.has(TITLE.kind) && insideMarker(x, y, TITLE)) ||
+        (transparent.has(SECONDARY.kind) && insideMarker(x, y, SECONDARY))
+          ? 0
+          : 255;
+    }
+  }
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(image.width, 0);
+  ihdr.writeUInt32BE(image.height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(rows)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function insideMarker(
+  x: number,
+  y: number,
+  marker: { x: number; y: number },
+): boolean {
+  return (
+    x >= marker.x &&
+    x < marker.x + fixture.markerSize &&
+    y >= marker.y &&
+    y < marker.y + fixture.markerSize
+  );
 }
 
 function chunk(type: string, body: Buffer): Buffer {
