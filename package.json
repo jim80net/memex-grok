@@ -11,6 +11,7 @@
   "scripts": {
     "audit": "pnpm audit --audit-level low",
     "build": "bun run build.ts",
+    "capture:check": "tsx scripts/check-capture-clipping.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -35,6 +36,7 @@
   "pnpm": {
     "overrides": {
       "esbuild": "0.28.1",
+      "postcss": "8.5.18",
       "protobufjs": "7.6.5",
       "sharp": "0.35.3",
       "tar": "7.5.21",

@@ -1,0 +1,49 @@
+{
+  "markerSize": 3,
+  "titleMarker": [255, 0, 255],
+  "secondaryMarker": [0, 255, 255],
+  "affected": [
+    {
+      "png": "09-search-populated.png",
+      "lost": ["title-prefix", "secondary-prefix"]
+    },
+    {
+      "png": "11-search-invalid.png",
+      "lost": ["title-prefix", "secondary-prefix"]
+    },
+    {
+      "png": "14-read-page-1.png",
+      "lost": ["title-prefix", "secondary-prefix"]
+    },
+    {
+      "png": "21-read-empty.png",
+      "lost": ["title-prefix", "secondary-prefix"]
+    },
+    {
+      "png": "25-mcp-schema-rejects.png",
+      "lost": ["title-prefix", "secondary-prefix"]
+    },
+    {
+      "png": "27-mcp-security.png",
+      "lost": ["title-prefix", "secondary-prefix"]
+    }
+  ],
+  "trueNegatives": [
+    {
+      "png": "02-doctor-registered.png",
+      "lost": []
+    },
+    {
+      "png": "06-sync.png",
+      "lost": []
+    },
+    {
+      "png": "15-read-page-2.png",
+      "lost": []
+    },
+    {
+      "png": "26-mcp-malformed-survival.png",
+      "lost": []
+    }
+  ]
+}
