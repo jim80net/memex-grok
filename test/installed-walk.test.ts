@@ -96,7 +96,7 @@ function fixturePackage(): string {
   const out = mkdtempSync(join(tmpdir(), "memex-walk-package-"));
   mkdirSync(join(out, "render-sources"));
   const head = git("rev-parse", "HEAD");
-  const origin = git("rev-parse", "origin/main");
+  const origin = git("rev-list", "--max-parents=0", "HEAD").split("\n")[0];
   const requiredCli = [
     "registered_help_long", "registered_doctor_json", "wrong_cwd_doctor_json",
     "older_source_newer_deployed_doctor_json", "registered_selfcheck_json", "sync_dry_run_json",
