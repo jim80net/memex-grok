@@ -13,7 +13,9 @@
     "build": "bun run build.ts",
     "capture:check": "tsx scripts/check-capture-clipping.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "walk:installed": "tsx scripts/walk-installed.ts",
+    "walk:review": "tsx scripts/walk-review.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
