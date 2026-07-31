@@ -147,7 +147,7 @@ function fixturePackage(): string {
 }
 
 function outputFor(label: string): string {
-  if (label === "registered_selfcheck_json") return JSON.stringify({ passed: true, steps: [{ passed: true }] });
+  if (label === "registered_selfcheck_json") return JSON.stringify({ ok: true, steps: [{ ok: true }] });
   if (label === "read_long_page_1" || label === "read_long_page_2") return "page\n\nbody\n\nContinue: next\nFull: full\n";
   if (label === "read_long_full" || label === "read_long_raw") return "x".repeat(1500);
   return "ok";

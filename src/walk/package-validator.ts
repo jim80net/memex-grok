@@ -70,7 +70,11 @@ export function validateWalkPackage(out: string, source: string, nonce: string):
   ];
   check("required_cli_semantics_present", requiredCli.every((label) => cliByLabel.has(label)), { requiredCli });
   const selfcheck = parseJsonOutput(cliByLabel.get("registered_selfcheck_json"));
-  check("installed_selfcheck_all_pass", selfcheck?.passed === true && selfcheck?.steps?.every((step: Json) => step.passed), selfcheck);
+  check(
+    "installed_selfcheck_all_pass",
+    selfcheck?.ok === true && selfcheck?.steps?.every((step: Json) => step.ok === true),
+    selfcheck,
+  );
 
   const tools = mcp.tools_list_response?.result?.tools?.map((tool: Json) => tool.name) ?? [];
   check("all_three_mcp_tools", ["memex_status", "memex_search", "memex_read_skill"].every((tool) => tools.includes(tool)) && tools.length === 3, tools);
