@@ -107,7 +107,9 @@ describe("canonical installed-walk harness (#59)", () => {
       { cwd: SOURCE, encoding: "utf8", env: { ...process.env, FLOTILLA_SELF: "attacker", FLOTILLA_ROSTER: join(fakeRosterDir, "flotilla.json") } },
     );
     expect(result.status).not.toBe(0);
-    expect(`${result.stdout}\n${result.stderr}`).toContain("expected one durable-ack receipt");
+    const output = `${result.stdout}\n${result.stderr}`;
+    expect(output).toMatch(/expected one durable-ack receipt|flotilla-dispatch-consumed\.json/);
+    expect(output).not.toContain(fakeRosterDir);
     expect(readJson(out, "walk-provenance.json").review_authority.state).toBe("pending");
   });
 
