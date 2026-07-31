@@ -23,6 +23,9 @@ The package records the harness commit and accepts it only when it shares proven
 Git ancestry with `origin/main`; a feature commit may be ahead or behind, but an
 unrelated history fails. It uses semantic coverage requirements rather than
 pinning a daily station count, frame count, or one expected source SHA.
+Finalization also requires the current checkout, captured CLI provenance,
+render manifest, and validation report to name the same full commit, so a
+between-phase checkout change cannot relabel older evidence.
 
 The following remain fail-closed:
 
@@ -46,14 +49,16 @@ file, the reviewer binds it with their own `FLOTILLA_SELF`:
 FLOTILLA_SELF=reviewer-seat pnpm walk:review -- \
   --nonce evening-walk-YYYYMMDDThhmmZ \
   --out /absolute/private/state/path \
-  --dispatch-nonce flotilla-dispatch-... \
-  --dispatch-ack flotilla-dispatch-...
+  --dispatch-nonce flotilla-dispatch-...
 ```
 
-Binding fails when the reviewer is the capture owner, the verdict names zero or
-multiple reviewers, the named reviewer differs from `FLOTILLA_SELF`, another
-reviewer already owns the slot, nonces conflict, or supersession is unresolved.
-The binding records the verdict SHA-256. `walk-provenance.json` and the later
+The reviewer identity is derived from the fleet's durable consumed-dispatch
+registry, not from caller-supplied acknowledgement text. Binding requires exactly
+one post-capture `durable-ack` sent by the Memex coordinator; `FLOTILLA_SELF` must
+agree with its recipient. It also fails when the reviewer is the capture owner,
+the verdict names zero or multiple reviewers, another reviewer already owns the
+slot, nonces conflict, or supersession is unresolved. The binding records the
+full receipt and verdict SHA-256. `walk-provenance.json` and the later
 `seeing-verdict.md` are intentionally excluded from the immutable raw-evidence
 inventory; every capture, render source, PNG, assertion, and report remains
 hash-bound.

@@ -12,6 +12,7 @@ import {
   validateWalkPackage,
 } from "../src/walk/package-validator.ts";
 import { bindReviewAuthority } from "../src/walk/reviewer-provenance.ts";
+import { assertFinalizationCommit } from "../src/walk/finalization-provenance.ts";
 
 const SOURCE = resolve(import.meta.dirname, "..");
 
@@ -68,27 +69,70 @@ describe("canonical installed-walk harness (#59)", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-"));
     writeJson(out, "walk-provenance.json", provenance());
     writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `grok-research` |\n");
-    bindReviewAuthority({ out, nonce: "walk-test-123", reviewer: "grok-research", dispatchNonce: "dispatch-1", dispatchAck: "dispatch-1" });
+    const registry = receiptRegistry("dispatch-1", "grok-research");
+    bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "dispatch-1", receiptRegistry: registry });
     expect(readJson(out, "walk-provenance.json").review_authority).toMatchObject({
       state: "bound",
       reviewer: "grok-research",
+      dispatch_receipt: expect.objectContaining({ sender: "memex", recipient: "grok-research", reason: "durable-ack" }),
       verdict_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `grok-research` |\nchanged\n");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", reviewer: "grok-research", dispatchNonce: "dispatch-1", dispatchAck: "dispatch-1" })).toThrow("immutable");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", reviewer: "memex-claude", dispatchNonce: "dispatch-2", dispatchAck: "dispatch-2" })).toThrow("sole reviewer");
+    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "dispatch-1", receiptRegistry: registry })).toThrow("immutable");
+    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "memex-claude", dispatchNonce: "dispatch-1", receiptRegistry: registry })).toThrow("does not match durable receipt recipient");
+  });
+
+  it("rejects caller-fabricated reviewer identity and acknowledgement text without a durable receipt", () => {
+    const out = mkdtempSync(join(tmpdir(), "memex-walk-review-hostile-"));
+    writeJson(out, "walk-provenance.json", provenance());
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `attacker`\n");
+    const registry = receiptRegistry("different-dispatch", "attacker");
+    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "attacker", dispatchNonce: "fabricated-equal-nonce-and-ack", receiptRegistry: registry })).toThrow("found 0");
+
+    const realRegistry = receiptRegistry("real-dispatch", "grok-research");
+    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "attacker", dispatchNonce: "real-dispatch", receiptRegistry: realRegistry })).toThrow("does not match durable receipt recipient");
+  });
+
+  it("rejects non-durable, wrong-sender, stale, duplicate, and incomplete receipts", () => {
+    const out = mkdtempSync(join(tmpdir(), "memex-walk-review-hostile-"));
+    writeJson(out, "walk-provenance.json", provenance());
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\n");
+    for (const [name, entries, message] of [
+      ["coordinator", [receipt("d", "grok-research", { reason: "coordinator-recipient" })], "found 0"],
+      ["sender", [receipt("d", "grok-research", { sender: "attacker" })], "not authorized dispatcher"],
+      ["stale", [receipt("d", "grok-research", { consumed_at: "2026-07-30T00:00:00.000Z" })], "predates"],
+      ["duplicate", [receipt("d", "grok-research"), receipt("d", "grok-research")], "found 2"],
+      ["incomplete", [receipt("d", "grok-research", { payload_hash: "caller-text" })], "incomplete"],
+    ] as const) {
+      const registry = join(out, `${name}.json`);
+      writeJsonFile(registry, { entries });
+      expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "d", receiptRegistry: registry })).toThrow(message);
+    }
   });
 
   it("rejects self-review and multiple reviewer declarations", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-"));
     writeJson(out, "walk-provenance.json", provenance());
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `memex-grok`\n");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", reviewer: "memex-grok", dispatchNonce: "d", dispatchAck: "d" })).toThrow("capture owner");
+    let registry = receiptRegistry("d", "memex-grok");
+    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "memex-grok", dispatchNonce: "d", receiptRegistry: registry })).toThrow("capture owner");
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\nReviewer: `memex-claude`\n");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", reviewer: "grok-research", dispatchNonce: "d", dispatchAck: "d" })).toThrow("exactly once");
+    registry = receiptRegistry("d", "grok-research");
+    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "d", receiptRegistry: registry })).toThrow("exactly once");
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\n");
     writeFileSync(join(out, "seeing-verdict-second.md"), "Reviewer: `memex-claude`\n");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", reviewer: "grok-research", dispatchNonce: "d", dispatchAck: "d" })).toThrow("one canonical");
+    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "d", receiptRegistry: registry })).toThrow("one canonical");
+  });
+
+  it("refuses to relabel evidence when HEAD changes between capture and finalization", () => {
+    const captured = "1".repeat(40);
+    expect(() => assertFinalizationCommit({
+      currentCommit: "2".repeat(40),
+      capturedCommit: captured,
+      renderedCommit: captured,
+      validatedCommit: captured,
+    })).toThrow("changed between capture");
+    expect(assertFinalizationCommit({ currentCommit: captured, capturedCommit: captured, renderedCommit: captured, validatedCommit: captured })).toBe(captured);
   });
 });
 
@@ -154,9 +198,18 @@ function outputFor(label: string): string {
 }
 function textResponse(text: string) { return { result: { content: [{ type: "text", text }] } }; }
 function errorResponse() { return { result: { isError: true, content: [{ type: "text", text: "rejected" }] } }; }
-function provenance() { return { walk_nonce: "walk-test-123", harness: { capture_owner: "memex-grok" }, review_authority: { state: "pending", seeing_nonce: "walk-test-123-seeing", reviewer: null, superseded: [] } }; }
+function provenance() { return { walk_nonce: "walk-test-123", harness: { capture_owner: "memex-grok", captured_at: "2026-07-31T00:00:00.000Z" }, review_authority: { state: "pending", seeing_nonce: "walk-test-123-seeing", reviewer: null, dispatcher: "memex", superseded: [] } }; }
 function readJson(out: string, name: string): any { return JSON.parse(readFileSync(join(out, name), "utf8")); }
 function writeJson(out: string, name: string, value: unknown): void { writeFileSync(join(out, name), `${JSON.stringify(value, null, 2)}\n`); }
+function writeJsonFile(path: string, value: unknown): void { writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`); }
+function receiptRegistry(nonce: string, recipient: string): string {
+  const path = join(mkdtempSync(join(tmpdir(), "flotilla-receipts-")), "flotilla-dispatch-consumed.json");
+  writeJsonFile(path, { entries: [receipt(nonce, recipient)] });
+  return path;
+}
+function receipt(nonce: string, recipient: string, overrides: Record<string, string> = {}) {
+  return { nonce, payload_hash: "a".repeat(32), consumed_at: "2026-08-01T00:00:00.000Z", reason: "durable-ack", sender: "memex", recipient, ...overrides };
+}
 function git(...args: string[]): string { return execFileSync("git", args, { cwd: SOURCE, encoding: "utf8" }).trim(); }
 
 function markedPng(): Buffer {

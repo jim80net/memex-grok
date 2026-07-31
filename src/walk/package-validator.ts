@@ -33,6 +33,7 @@ export interface Check {
 
 export interface ValidationReport {
   nonce: string;
+  harness_commit: string;
   passed: boolean;
   passed_count: number;
   check_count: number;
@@ -106,7 +107,7 @@ export function validateWalkPackage(out: string, source: string, nonce: string):
   check("final_png_pixel_prefix_gate", pixelReport.ok, pixelReport);
   check("owned_package_references_only", findForbiddenOwnedReferences(out).length === 0, findForbiddenOwnedReferences(out));
 
-  return { nonce, passed: checks.every((entry) => entry.passed), passed_count: checks.filter((entry) => entry.passed).length, check_count: checks.length, checks };
+  return { nonce, harness_commit: harnessCommit, passed: checks.every((entry) => entry.passed), passed_count: checks.filter((entry) => entry.passed).length, check_count: checks.length, checks };
 }
 
 export function findForbiddenOwnedReferences(out: string): Array<{ file: string; token: string }> {
