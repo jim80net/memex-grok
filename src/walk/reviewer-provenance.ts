@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const CANONICAL_RECEIPT_REGISTRY = "/home/jim/workspace/github.com/General-ML/a1-fleet-ops/state/flotilla-dispatch-consumed.json";
+
 interface DispatchReceipt {
   nonce: string;
   payload_hash: string;
@@ -16,14 +18,18 @@ export interface BindReviewInput {
   nonce: string;
   claimedReviewer: string;
   dispatchNonce: string;
-  receiptRegistry: string;
 }
 
 export function bindReviewAuthority(input: BindReviewInput): void {
+  bindReviewAuthorityUsingRegistry(input, CANONICAL_RECEIPT_REGISTRY);
+}
+
+/** Dependency seam for isolated tests; the shipped command never exposes a registry selector. */
+export function bindReviewAuthorityUsingRegistry(input: BindReviewInput, receiptRegistry: string): void {
   const provenancePath = join(input.out, "walk-provenance.json");
   const verdictPath = join(input.out, "seeing-verdict.md");
   const provenance = JSON.parse(readFileSync(provenancePath, "utf8"));
-  const receipt = loadDurableReceipt(input.receiptRegistry, input.dispatchNonce);
+  const receipt = loadDurableReceipt(receiptRegistry, input.dispatchNonce);
   const reviewer = receipt.recipient;
   if (input.claimedReviewer !== reviewer) {
     throw new Error(`FLOTILLA_SELF '${input.claimedReviewer}' does not match durable receipt recipient '${reviewer}'`);

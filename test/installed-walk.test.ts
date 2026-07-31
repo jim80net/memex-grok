@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,7 +11,7 @@ import {
   findForbiddenOwnedReferences,
   validateWalkPackage,
 } from "../src/walk/package-validator.ts";
-import { bindReviewAuthority } from "../src/walk/reviewer-provenance.ts";
+import { bindReviewAuthorityUsingRegistry } from "../src/walk/reviewer-provenance.ts";
 import { assertFinalizationCommit } from "../src/walk/finalization-provenance.ts";
 
 const SOURCE = resolve(import.meta.dirname, "..");
@@ -70,7 +70,7 @@ describe("canonical installed-walk harness (#59)", () => {
     writeJson(out, "walk-provenance.json", provenance());
     writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `grok-research` |\n");
     const registry = receiptRegistry("dispatch-1", "grok-research");
-    bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "dispatch-1", receiptRegistry: registry });
+    bindForTest(out, "grok-research", "dispatch-1", registry);
     expect(readJson(out, "walk-provenance.json").review_authority).toMatchObject({
       state: "bound",
       reviewer: "grok-research",
@@ -78,8 +78,8 @@ describe("canonical installed-walk harness (#59)", () => {
       verdict_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `grok-research` |\nchanged\n");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "dispatch-1", receiptRegistry: registry })).toThrow("immutable");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "memex-claude", dispatchNonce: "dispatch-1", receiptRegistry: registry })).toThrow("does not match durable receipt recipient");
+    expect(() => bindForTest(out, "grok-research", "dispatch-1", registry)).toThrow("immutable");
+    expect(() => bindForTest(out, "memex-claude", "dispatch-1", registry)).toThrow("does not match durable receipt recipient");
   });
 
   it("rejects caller-fabricated reviewer identity and acknowledgement text without a durable receipt", () => {
@@ -87,10 +87,28 @@ describe("canonical installed-walk harness (#59)", () => {
     writeJson(out, "walk-provenance.json", provenance());
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `attacker`\n");
     const registry = receiptRegistry("different-dispatch", "attacker");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "attacker", dispatchNonce: "fabricated-equal-nonce-and-ack", receiptRegistry: registry })).toThrow("found 0");
+    expect(() => bindForTest(out, "attacker", "fabricated-equal-nonce-and-ack", registry)).toThrow("found 0");
 
     const realRegistry = receiptRegistry("real-dispatch", "grok-research");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "attacker", dispatchNonce: "real-dispatch", receiptRegistry: realRegistry })).toThrow("does not match durable receipt recipient");
+    expect(() => bindForTest(out, "attacker", "real-dispatch", realRegistry)).toThrow("does not match durable receipt recipient");
+  });
+
+  it("ignores a caller-controlled FLOTILLA_ROSTER with a fake receipt and matching attacker identity", () => {
+    const out = mkdtempSync(join(tmpdir(), "memex-walk-review-fake-roster-"));
+    writeJson(out, "walk-provenance.json", provenance());
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `attacker`\n");
+    const fakeRosterDir = mkdtempSync(join(tmpdir(), "fake-flotilla-roster-"));
+    const fakeNonce = `fake-dispatch-${Date.now()}-${process.pid}`;
+    writeJsonFile(join(fakeRosterDir, "flotilla.json"), {});
+    writeJsonFile(join(fakeRosterDir, "flotilla-dispatch-consumed.json"), { entries: [receipt(fakeNonce, "attacker")] });
+    const result = spawnSync(
+      "pnpm",
+      ["exec", "tsx", "scripts/walk-review.ts", "--nonce", "walk-test-123", "--out", out, "--dispatch-nonce", fakeNonce],
+      { cwd: SOURCE, encoding: "utf8", env: { ...process.env, FLOTILLA_SELF: "attacker", FLOTILLA_ROSTER: join(fakeRosterDir, "flotilla.json") } },
+    );
+    expect(result.status).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("expected one durable-ack receipt");
+    expect(readJson(out, "walk-provenance.json").review_authority.state).toBe("pending");
   });
 
   it("rejects non-durable, wrong-sender, stale, duplicate, and incomplete receipts", () => {
@@ -106,7 +124,7 @@ describe("canonical installed-walk harness (#59)", () => {
     ] as const) {
       const registry = join(out, `${name}.json`);
       writeJsonFile(registry, { entries });
-      expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "d", receiptRegistry: registry })).toThrow(message);
+      expect(() => bindForTest(out, "grok-research", "d", registry)).toThrow(message);
     }
   });
 
@@ -115,13 +133,13 @@ describe("canonical installed-walk harness (#59)", () => {
     writeJson(out, "walk-provenance.json", provenance());
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `memex-grok`\n");
     let registry = receiptRegistry("d", "memex-grok");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "memex-grok", dispatchNonce: "d", receiptRegistry: registry })).toThrow("capture owner");
+    expect(() => bindForTest(out, "memex-grok", "d", registry)).toThrow("capture owner");
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\nReviewer: `memex-claude`\n");
     registry = receiptRegistry("d", "grok-research");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "d", receiptRegistry: registry })).toThrow("exactly once");
+    expect(() => bindForTest(out, "grok-research", "d", registry)).toThrow("exactly once");
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\n");
     writeFileSync(join(out, "seeing-verdict-second.md"), "Reviewer: `memex-claude`\n");
-    expect(() => bindReviewAuthority({ out, nonce: "walk-test-123", claimedReviewer: "grok-research", dispatchNonce: "d", receiptRegistry: registry })).toThrow("one canonical");
+    expect(() => bindForTest(out, "grok-research", "d", registry)).toThrow("one canonical");
   });
 
   it("refuses to relabel evidence when HEAD changes between capture and finalization", () => {
@@ -209,6 +227,9 @@ function receiptRegistry(nonce: string, recipient: string): string {
 }
 function receipt(nonce: string, recipient: string, overrides: Record<string, string> = {}) {
   return { nonce, payload_hash: "a".repeat(32), consumed_at: "2026-08-01T00:00:00.000Z", reason: "durable-ack", sender: "memex", recipient, ...overrides };
+}
+function bindForTest(out: string, claimedReviewer: string, dispatchNonce: string, receiptRegistry: string): void {
+  bindReviewAuthorityUsingRegistry({ out, nonce: "walk-test-123", claimedReviewer, dispatchNonce }, receiptRegistry);
 }
 function git(...args: string[]): string { return execFileSync("git", args, { cwd: SOURCE, encoding: "utf8" }).trim(); }
 
