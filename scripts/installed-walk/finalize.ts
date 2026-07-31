@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findForbiddenOwnedReferences, inventory } from "../../src/walk/package-validator.ts";
 import { assertFinalizationCommit } from "../../src/walk/finalization-provenance.ts";
+import { REVIEW_KEY_ID } from "../../src/walk/reviewer-provenance.ts";
 import { loadConfig } from "./config.ts";
 
 const config = loadConfig(process.argv.slice(2), { allowPopulatedOut: true });
@@ -32,9 +33,10 @@ const provenance = {
     authority_file: "seeing-verdict.md",
     seeing_nonce: `${config.nonce}-seeing`,
     reviewer: null,
-    dispatcher: "memex",
+    attestation_key_id: REVIEW_KEY_ID,
     dispatch_nonce: null,
-    dispatch_receipt: null,
+    attestation_sha256: null,
+    signed_attestation: null,
     superseded: [],
   },
 };

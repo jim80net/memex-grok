@@ -49,18 +49,17 @@ file, the reviewer binds it with their own `FLOTILLA_SELF`:
 FLOTILLA_SELF=reviewer-seat pnpm walk:review -- \
   --nonce evening-walk-YYYYMMDDThhmmZ \
   --out /absolute/private/state/path \
-  --dispatch-nonce flotilla-dispatch-...
+  --attestation /absolute/private/path/review-attestation.json
 ```
 
-The reviewer identity is derived from the fleet's canonical durable
-consumed-dispatch registry, not from caller-supplied acknowledgement text or a
-caller-selected `FLOTILLA_ROSTER`. The source-owned command fixes that trust
-anchor to the canonical fleet coordination checkout. Binding
-requires exactly one post-capture `durable-ack` sent by the Memex coordinator;
-`FLOTILLA_SELF` must agree with its recipient. It also fails when the reviewer
+The reviewer identity and durable receipt are carried in an Ed25519-signed
+attestation created by private coordination tooling. The public command embeds
+only the public verification key: the caller may choose an attestation path but
+cannot forge or alter its statement. `FLOTILLA_SELF` must agree with the signed
+reviewer. Binding also fails when the reviewer
 is the capture owner, the verdict names zero or multiple reviewers, another
 reviewer already owns the slot, nonces conflict, or supersession is unresolved.
-The binding records the full receipt and verdict SHA-256. `walk-provenance.json` and the later
-`seeing-verdict.md` are intentionally excluded from the immutable raw-evidence
-inventory; every capture, render source, PNG, assertion, and report remains
-hash-bound.
+The binding records the signed attestation plus attestation/verdict SHA-256
+hashes. `walk-provenance.json` and the later `seeing-verdict.md` are
+intentionally excluded from the immutable raw-evidence inventory; every capture,
+render source, PNG, assertion, and report remains hash-bound.

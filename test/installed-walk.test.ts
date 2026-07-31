@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,10 +12,12 @@ import {
   findForbiddenOwnedReferences,
   validateWalkPackage,
 } from "../src/walk/package-validator.ts";
-import { bindReviewAuthorityUsingRegistry } from "../src/walk/reviewer-provenance.ts";
+import { createReviewAuthorityBinder } from "../src/walk/reviewer-provenance.ts";
 import { assertFinalizationCommit } from "../src/walk/finalization-provenance.ts";
 
 const SOURCE = resolve(import.meta.dirname, "..");
+const TEST_KEYS = generateKeyPairSync("ed25519");
+const bindReviewForTest = createReviewAuthorityBinder(TEST_KEYS.publicKey.export({ type: "spki", format: "pem" }).toString());
 
 describe("canonical installed-walk harness (#59)", () => {
   it("uses semantic minima and accepts additive stations/frames without exact daily pins", () => {
@@ -68,80 +71,117 @@ describe("canonical installed-walk harness (#59)", () => {
   it("binds exactly one independent reviewer and rejects conflicts", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-"));
     writeJson(out, "walk-provenance.json", provenance());
-    writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `grok-research` |\n");
-    const registry = receiptRegistry("dispatch-1", "grok-research");
-    bindForTest(out, "grok-research", "dispatch-1", registry);
+    writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `independent-reviewer` |\n");
+    const attestation = signedAttestation(out, "independent-reviewer");
+    bindForTest(out, "independent-reviewer", attestation);
     expect(readJson(out, "walk-provenance.json").review_authority).toMatchObject({
       state: "bound",
-      reviewer: "grok-research",
-      dispatch_receipt: expect.objectContaining({ sender: "memex", recipient: "grok-research", reason: "durable-ack" }),
+      reviewer: "independent-reviewer",
+      key_id: "walk-review-ed25519-v1",
+      signed_attestation: expect.objectContaining({ signature: expect.any(String) }),
       verdict_sha256: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
-    writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `grok-research` |\nchanged\n");
-    expect(() => bindForTest(out, "grok-research", "dispatch-1", registry)).toThrow("immutable");
-    expect(() => bindForTest(out, "memex-claude", "dispatch-1", registry)).toThrow("does not match durable receipt recipient");
+    writeFileSync(join(out, "seeing-verdict.md"), "| Reviewer | `independent-reviewer` |\nchanged\n");
+    expect(() => bindForTest(out, "independent-reviewer", attestation)).toThrow("immutable");
+    expect(() => bindForTest(out, "alternate-reviewer", attestation)).toThrow("does not match signed reviewer");
   });
 
-  it("rejects caller-fabricated reviewer identity and acknowledgement text without a durable receipt", () => {
+  it("rejects caller-fabricated or altered attestations", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-hostile-"));
     writeJson(out, "walk-provenance.json", provenance());
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `attacker`\n");
-    const registry = receiptRegistry("different-dispatch", "attacker");
-    expect(() => bindForTest(out, "attacker", "fabricated-equal-nonce-and-ack", registry)).toThrow("found 0");
-
-    const realRegistry = receiptRegistry("real-dispatch", "grok-research");
-    expect(() => bindForTest(out, "attacker", "real-dispatch", realRegistry)).toThrow("does not match durable receipt recipient");
+    const attestation = signedAttestation(out, "attacker");
+    const altered = readJsonFile(attestation);
+    altered.statement.dispatch_nonce = "fabricated";
+    writeJsonFile(attestation, altered);
+    expect(() => bindForTest(out, "attacker", attestation)).toThrow("signature verification failed");
   });
 
-  it("ignores a caller-controlled FLOTILLA_ROSTER with a fake receipt and matching attacker identity", () => {
+  it("rejects signed envelopes with unknown or missing fields", () => {
+    const out = mkdtempSync(join(tmpdir(), "memex-walk-review-schema-"));
+    writeJson(out, "walk-provenance.json", provenance());
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `independent-reviewer`\n");
+    const extra = signedAttestation(out, "independent-reviewer", {}, "extra");
+    const extraEnvelope = readJsonFile(extra);
+    extraEnvelope.statement.untrusted = "field";
+    extraEnvelope.signature = sign(null, Buffer.from(JSON.stringify(extraEnvelope.statement)), TEST_KEYS.privateKey).toString("base64");
+    writeJsonFile(extra, extraEnvelope);
+    expect(() => bindForTest(out, "independent-reviewer", extra)).toThrow("invalid signed review attestation envelope");
+
+    const missing = signedAttestation(out, "independent-reviewer", {}, "missing");
+    const missingEnvelope = readJsonFile(missing);
+    delete missingEnvelope.statement.issuer_role;
+    missingEnvelope.signature = sign(null, Buffer.from(JSON.stringify(missingEnvelope.statement)), TEST_KEYS.privateKey).toString("base64");
+    writeJsonFile(missing, missingEnvelope);
+    expect(() => bindForTest(out, "independent-reviewer", missing)).toThrow("invalid signed review attestation envelope");
+  });
+
+  it("rejects a fake roster, fake identity, and attacker-signed receipt through the shipped command", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-fake-roster-"));
     writeJson(out, "walk-provenance.json", provenance());
     writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `attacker`\n");
     const fakeRosterDir = mkdtempSync(join(tmpdir(), "fake-flotilla-roster-"));
-    const fakeNonce = `fake-dispatch-${Date.now()}-${process.pid}`;
     writeJsonFile(join(fakeRosterDir, "flotilla.json"), {});
-    writeJsonFile(join(fakeRosterDir, "flotilla-dispatch-consumed.json"), { entries: [receipt(fakeNonce, "attacker")] });
+    writeJsonFile(join(fakeRosterDir, "flotilla-dispatch-consumed.json"), { entries: [{ reason: "durable-ack", recipient: "attacker" }] });
+    const attackerKeys = generateKeyPairSync("ed25519");
+    const statement = reviewStatement("attacker");
+    const fakeAttestation = join(fakeRosterDir, "attestation.json");
+    writeJsonFile(fakeAttestation, envelope(statement, attackerKeys.privateKey));
     const result = spawnSync(
       "pnpm",
-      ["exec", "tsx", "scripts/walk-review.ts", "--nonce", "walk-test-123", "--out", out, "--dispatch-nonce", fakeNonce],
+      ["exec", "tsx", "scripts/walk-review.ts", "--nonce", "walk-test-123", "--out", out, "--attestation", fakeAttestation],
       { cwd: SOURCE, encoding: "utf8", env: { ...process.env, FLOTILLA_SELF: "attacker", FLOTILLA_ROSTER: join(fakeRosterDir, "flotilla.json") } },
     );
     expect(result.status).not.toBe(0);
     const output = `${result.stdout}\n${result.stderr}`;
-    expect(output).toMatch(/expected one durable-ack receipt|flotilla-dispatch-consumed\.json/);
-    expect(output).not.toContain(fakeRosterDir);
+    expect(output).toContain("signature verification failed");
     expect(readJson(out, "walk-provenance.json").review_authority.state).toBe("pending");
   });
 
-  it("rejects non-durable, wrong-sender, stale, duplicate, and incomplete receipts", () => {
+  it("rejects signed attestations with invalid scope, role, timing, or receipt fields", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-hostile-"));
     writeJson(out, "walk-provenance.json", provenance());
-    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\n");
-    for (const [name, entries, message] of [
-      ["coordinator", [receipt("d", "grok-research", { reason: "coordinator-recipient" })], "found 0"],
-      ["sender", [receipt("d", "grok-research", { sender: "attacker" })], "not authorized dispatcher"],
-      ["stale", [receipt("d", "grok-research", { consumed_at: "2026-07-30T00:00:00.000Z" })], "predates"],
-      ["duplicate", [receipt("d", "grok-research"), receipt("d", "grok-research")], "found 2"],
-      ["incomplete", [receipt("d", "grok-research", { payload_hash: "caller-text" })], "incomplete"],
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `independent-reviewer`\n");
+    for (const [name, overrides, message] of [
+      ["scope", { scope: "other" }, "invalid scope"],
+      ["role", { issuer_role: "attacker" }, "invalid scope"],
+      ["reason", { reason: "manual" }, "invalid scope"],
+      ["payload", { payload_hash: "caller-text" }, "invalid scope"],
+      ["stale", { consumed_at: "2026-07-30T00:00:00.000Z" }, "predates"],
+      ["issued-before-receipt", { issued_at: "2026-07-31T12:00:00.000Z" }, "predates"],
     ] as const) {
-      const registry = join(out, `${name}.json`);
-      writeJsonFile(registry, { entries });
-      expect(() => bindForTest(out, "grok-research", "d", registry)).toThrow(message);
+      const attestation = signedAttestation(out, "independent-reviewer", overrides, name);
+      expect(() => bindForTest(out, "independent-reviewer", attestation)).toThrow(message);
     }
   });
 
   it("rejects self-review and multiple reviewer declarations", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-"));
     writeJson(out, "walk-provenance.json", provenance());
-    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `memex-grok`\n");
-    let registry = receiptRegistry("d", "memex-grok");
-    expect(() => bindForTest(out, "memex-grok", "d", registry)).toThrow("capture owner");
-    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\nReviewer: `memex-claude`\n");
-    registry = receiptRegistry("d", "grok-research");
-    expect(() => bindForTest(out, "grok-research", "d", registry)).toThrow("exactly once");
-    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `grok-research`\n");
-    writeFileSync(join(out, "seeing-verdict-second.md"), "Reviewer: `memex-claude`\n");
-    expect(() => bindForTest(out, "grok-research", "d", registry)).toThrow("one canonical");
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `capture-owner`\n");
+    let attestation = signedAttestation(out, "capture-owner");
+    expect(() => bindForTest(out, "capture-owner", attestation)).toThrow("capture owner");
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `independent-reviewer`\nReviewer: `alternate-reviewer`\n");
+    attestation = signedAttestation(out, "independent-reviewer");
+    expect(() => bindForTest(out, "independent-reviewer", attestation)).toThrow("exactly once");
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `independent-reviewer`\n");
+    writeFileSync(join(out, "seeing-verdict-second.md"), "Reviewer: `alternate-reviewer`\n");
+    expect(() => bindForTest(out, "independent-reviewer", attestation)).toThrow("one canonical");
+  });
+
+  it("keeps installed-walk public surfaces free of fleet partition leaks", () => {
+    const hostIdentity = ["", "home", "jim"].join("/");
+    const privateOrganization = ["General", "ML"].join("-");
+    const files = [
+      "src/walk/reviewer-provenance.ts", "src/walk/finalization-provenance.ts",
+      "src/walk/package-validator.ts", "scripts/walk-review.ts", "scripts/walk-installed.ts",
+      "scripts/installed-walk/finalize.ts", "docs/installed-walk.md",
+    ];
+    const leaks = files.flatMap((file) => {
+      const text = readFileSync(join(SOURCE, file), "utf8");
+      return [hostIdentity, privateOrganization].filter((token) => text.includes(token)).map((token) => ({ file, token }));
+    });
+    expect(leaks).toEqual([]);
   });
 
   it("refuses to relabel evidence when HEAD changes between capture and finalization", () => {
@@ -218,20 +258,29 @@ function outputFor(label: string): string {
 }
 function textResponse(text: string) { return { result: { content: [{ type: "text", text }] } }; }
 function errorResponse() { return { result: { isError: true, content: [{ type: "text", text: "rejected" }] } }; }
-function provenance() { return { walk_nonce: "walk-test-123", harness: { capture_owner: "memex-grok", captured_at: "2026-07-31T00:00:00.000Z" }, review_authority: { state: "pending", seeing_nonce: "walk-test-123-seeing", reviewer: null, dispatcher: "memex", superseded: [] } }; }
+function provenance() { return { walk_nonce: "walk-test-123", harness: { capture_owner: "capture-owner", captured_at: "2026-07-31T00:00:00.000Z" }, review_authority: { state: "pending", seeing_nonce: "walk-test-123-seeing", reviewer: null, attestation_key_id: "walk-review-ed25519-v1", superseded: [] } }; }
 function readJson(out: string, name: string): any { return JSON.parse(readFileSync(join(out, name), "utf8")); }
+function readJsonFile(path: string): any { return JSON.parse(readFileSync(path, "utf8")); }
 function writeJson(out: string, name: string, value: unknown): void { writeFileSync(join(out, name), `${JSON.stringify(value, null, 2)}\n`); }
 function writeJsonFile(path: string, value: unknown): void { writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`); }
-function receiptRegistry(nonce: string, recipient: string): string {
-  const path = join(mkdtempSync(join(tmpdir(), "flotilla-receipts-")), "flotilla-dispatch-consumed.json");
-  writeJsonFile(path, { entries: [receipt(nonce, recipient)] });
+function reviewStatement(reviewer: string, overrides: Record<string, string> = {}) {
+  return {
+    scope: "installed-walk-review", walk_nonce: "walk-test-123", seeing_nonce: "walk-test-123-seeing",
+    dispatch_nonce: "flotilla-dispatch-11111111", payload_hash: "a".repeat(32), consumed_at: "2026-08-01T00:00:00.000Z",
+    reason: "durable-ack", issuer_role: "review-coordinator", reviewer, issued_at: "2026-08-01T00:00:01.000Z",
+    ...overrides,
+  };
+}
+function envelope(statement: ReturnType<typeof reviewStatement>, privateKey = TEST_KEYS.privateKey) {
+  return { schema_version: 1, key_id: "walk-review-ed25519-v1", statement, signature: sign(null, Buffer.from(JSON.stringify(statement)), privateKey).toString("base64") };
+}
+function signedAttestation(out: string, reviewer: string, overrides: Record<string, string> = {}, suffix = "review"): string {
+  const path = join(out, `${suffix}-attestation.json`);
+  writeJsonFile(path, envelope(reviewStatement(reviewer, overrides)));
   return path;
 }
-function receipt(nonce: string, recipient: string, overrides: Record<string, string> = {}) {
-  return { nonce, payload_hash: "a".repeat(32), consumed_at: "2026-08-01T00:00:00.000Z", reason: "durable-ack", sender: "memex", recipient, ...overrides };
-}
-function bindForTest(out: string, claimedReviewer: string, dispatchNonce: string, receiptRegistry: string): void {
-  bindReviewAuthorityUsingRegistry({ out, nonce: "walk-test-123", claimedReviewer, dispatchNonce }, receiptRegistry);
+function bindForTest(out: string, claimedReviewer: string, attestationPath: string): void {
+  bindReviewForTest({ out, nonce: "walk-test-123", claimedReviewer, attestationPath });
 }
 function git(...args: string[]): string { return execFileSync("git", args, { cwd: SOURCE, encoding: "utf8" }).trim(); }
 
