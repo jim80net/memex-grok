@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export const REVIEW_KEY_ID = "walk-review-ed25519-v1";
+const DURABLE_RECEIPT_REASONS = new Set(["durable-ack", "coordinator-recipient"]);
 const REVIEW_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
 MCowBQYDK2VwAyEAnlmg7l75ktdmZtAFwPvxBaO0yjh4QNIs19ikaajJWfk=
 -----END PUBLIC KEY-----`;
@@ -54,7 +55,7 @@ export function createReviewAuthorityBinder(publicKeyPem: string): (input: BindR
       statement.scope !== "installed-walk-review" ||
       statement.walk_nonce !== input.nonce ||
       statement.seeing_nonce !== `${input.nonce}-seeing` ||
-      statement.reason !== "durable-ack" ||
+      !DURABLE_RECEIPT_REASONS.has(statement.reason) ||
       statement.issuer_role !== "review-coordinator" ||
       !/^flotilla-dispatch-[0-9a-f]{8}$/.test(statement.dispatch_nonce) ||
       !/^[0-9a-f]{32}$/.test(statement.payload_hash)
