@@ -55,8 +55,12 @@ FLOTILLA_SELF=reviewer-seat pnpm walk:review -- \
 The reviewer identity and durable receipt are carried in an Ed25519-signed
 attestation created by private coordination tooling. The public command embeds
 only the public verification key: the caller may choose an attestation path but
-cannot forge or alter its statement. `FLOTILLA_SELF` must agree with the signed
-reviewer. Binding also fails when the reviewer
+cannot forge or alter its statement. Receipt reasons remain fail-closed to the
+two durable coordination outcomes: `durable-ack` for explicit acknowledgement
+or `coordinator-recipient` for the coordinator path that is durable at
+admission. The private creator still verifies exact sender, recipient, nonce
+uniqueness, payload hash, and receipt time before signing. `FLOTILLA_SELF` must
+agree with the signed reviewer. Binding also fails when the reviewer
 is the capture owner, the verdict names zero or multiple reviewers, another
 reviewer already owns the slot, nonces conflict, or supersession is unresolved.
 The binding records the signed attestation plus attestation/verdict SHA-256

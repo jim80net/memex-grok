@@ -86,6 +86,29 @@ describe("canonical installed-walk harness (#59)", () => {
     expect(() => bindForTest(out, "alternate-reviewer", attestation)).toThrow("does not match signed reviewer");
   });
 
+  it("binds the current durable coordinator-recipient receipt without weakening other receipt fields", () => {
+    const out = mkdtempSync(join(tmpdir(), "memex-walk-coordinator-review-"));
+    writeJson(out, "walk-provenance.json", provenance());
+    writeFileSync(join(out, "seeing-verdict.md"), "Reviewer: `independent-reviewer`\n");
+    const attestation = signedAttestation(out, "independent-reviewer", {
+      reason: "coordinator-recipient",
+    });
+
+    bindForTest(out, "independent-reviewer", attestation);
+
+    expect(readJson(out, "walk-provenance.json").review_authority).toMatchObject({
+      state: "bound",
+      reviewer: "independent-reviewer",
+      dispatch_nonce: "flotilla-dispatch-11111111",
+      signed_attestation: {
+        statement: {
+          reason: "coordinator-recipient",
+          payload_hash: "a".repeat(32),
+        },
+      },
+    });
+  });
+
   it("rejects caller-fabricated or altered attestations", () => {
     const out = mkdtempSync(join(tmpdir(), "memex-walk-review-hostile-"));
     writeJson(out, "walk-provenance.json", provenance());
