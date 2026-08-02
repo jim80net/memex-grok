@@ -35,13 +35,19 @@ export function buildGrokScanRootRegistry(
   return augmentPeerProjectRoots(cwd, registry);
 }
 
-/** Replace unclassified roots for peer harness project skill dirs with stable catalog keys. */
+/** Replace only unclassified peer project roots; preserve higher-authority catalog roots. */
 function augmentPeerProjectRoots(cwd: string, registry: ScanRootRegistry): ScanRootRegistry {
   const peerRoots: ScanRoot[] = [
     { key: "claude-project", rootPath: resolve(join(cwd, ".claude", "skills")) },
   ];
   let out = registry;
   for (const peer of peerRoots) {
+    // At cwd=$HOME the peer root is the registered global Claude root. Relabeling
+    // that same corpus as project-local makes portable handles and cache keys vary
+    // solely with caller cwd (memex-grok#62).
+    if (out.some((root) => root.rootPath === peer.rootPath && root.key === "claude-global")) {
+      continue;
+    }
     out = out.filter((r) => r.rootPath !== peer.rootPath);
     out.push(peer);
   }
