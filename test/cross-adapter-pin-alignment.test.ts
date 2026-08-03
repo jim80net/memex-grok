@@ -8,11 +8,12 @@ import { describe, expect, it } from "vitest";
 
 const CROSS_ADAPTER_TRANSFORMERS_RANGE = "^3.8.1";
 const CROSS_ADAPTER_TRANSFORMERS_RESOLVED = "3.8.1";
-// Security-mitigated published-artifact baseline: memex-core@0.7.1.
-const CROSS_ADAPTER_MEMEX_CORE_RANGE = "^0.7.1";
-const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.1";
+// Security-mitigated published-artifact baseline: memex-core@0.7.3.
+const CROSS_ADAPTER_MEMEX_CORE_RANGE = "0.7.3";
+const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.3";
 const APPLICATION_SECURITY_OVERRIDES = {
   esbuild: "0.28.1",
+  postcss: "8.5.23",
   protobufjs: "7.6.5",
   sharp: "0.35.3",
   tar: "7.5.21",
