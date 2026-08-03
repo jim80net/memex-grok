@@ -20,7 +20,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
-describe("Core 0.7.1 dependency security contract", () => {
+describe("Core 0.7.3 dependency security contract", () => {
   it("resolves one patched Sharp/tar/protobufjs production graph", async () => {
     const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
     const { stdout } = await execFileAsync(
