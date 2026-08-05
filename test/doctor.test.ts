@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { chdir } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
 import { compareBuildStampOrder, type DoctorProbes, runChecks } from "../src/cli/doctor.ts";
-import { POSIX_HOME_PREFIX } from "../src/core/host-path-egress.ts";
 import type { GrokPaths } from "../src/core/paths.ts";
 
 const roots: string[] = [];
@@ -161,8 +160,8 @@ describe("rules-projection + memory-surface", () => {
 });
 
 describe("host-path egress (#13)", () => {
-  it("scrubs generic POSIX home paths from every check message", async () => {
-    const fakeHome = `${POSIX_HOME_PREFIX}example-user`;
+  it("scrubs /home/ from every check message", async () => {
+    const fakeHome = "/home/testuser";
     const paths = fakePaths({
       binaryCacheDir: `${fakeHome}/.cache/memex-grok`,
       syncRepoDir: `${fakeHome}/.local/share/memex`,
@@ -179,9 +178,9 @@ describe("host-path egress (#13)", () => {
       }),
     );
     const blob = JSON.stringify(r);
-    expect(blob).not.toContain(POSIX_HOME_PREFIX);
+    expect(blob).not.toMatch(/\/home\//);
     for (const c of r.checks) {
-      expect(c.message).not.toContain(POSIX_HOME_PREFIX);
+      expect(c.message).not.toMatch(/\/home\//);
     }
     expect(r.checks.find((c) => c.name === "binary")?.message).toContain("~/.cache/memex-grok");
   });

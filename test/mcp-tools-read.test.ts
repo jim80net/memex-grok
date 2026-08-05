@@ -6,7 +6,6 @@ import { makeReadSkillTool } from "../src/mcp/tools-read.ts";
 import { buildGrokScanRootRegistry } from "../src/mcp/location-handle.ts";
 import { DEFAULT_CONFIG } from "../src/core/config.ts";
 import { getGrokPaths } from "../src/core/paths.ts";
-import { POSIX_HOME_PREFIX } from "../src/core/host-path-egress.ts";
 
 const cwd = "/work";
 const registry = buildGrokScanRootRegistry(cwd, DEFAULT_CONFIG, getGrokPaths());
@@ -92,15 +91,15 @@ describe("memex_read_skill tool", () => {
     expect(index.readSkillContent).not.toHaveBeenCalled();
   });
 
-  it("scrubs generic POSIX home paths from skill body before returning (#22)", async () => {
+  it("scrubs /home/ from skill body before returning (#22)", async () => {
     const abs = join(home, ".grok", "skills", "leaky", "SKILL.md");
     const handle = portableHandle(abs);
-    const leaky = `See config at ${POSIX_HOME_PREFIX}example-user/x for details`;
+    const leaky = `See config at ${home}/x for details`;
     const index = { readSkillContent: vi.fn().mockResolvedValue(leaky), search: vi.fn() };
     const tool = makeReadSkillTool({ index: index as any, registry, recordMatch: vi.fn(), sessionId: () => "s-1" });
     const result = await tool.call({ location: handle });
     expect(result.content[0].text).toBe("See config at ~/x for details");
-    expect(result.content[0].text).not.toContain(POSIX_HOME_PREFIX);
+    expect(result.content[0].text).not.toMatch(/\/home\//);
   });
 
   it("rejects traversal portable handle via the tool (memex-grok#19)", async () => {

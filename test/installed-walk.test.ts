@@ -14,7 +14,6 @@ import {
 } from "../src/walk/package-validator.ts";
 import { createReviewAuthorityBinder } from "../src/walk/reviewer-provenance.ts";
 import { assertFinalizationCommit } from "../src/walk/finalization-provenance.ts";
-import { POSIX_HOME_PREFIX } from "../src/core/host-path-egress.ts";
 
 const SOURCE = resolve(import.meta.dirname, "..");
 const TEST_KEYS = generateKeyPairSync("ed25519");
@@ -45,7 +44,7 @@ describe("canonical installed-walk harness (#59)", () => {
     writeJson(out, "01-live-cli-stations.json", cli);
     const mcp = readJson(out, "02-live-mcp-transcript.json");
     mcp.transcript.find((entry: any) => entry.label === SCHEMA_LABELS[0]).response.result.isError = false;
-    mcp.transcript.push({ label: "host_leak", response: textResponse(`${POSIX_HOME_PREFIX}example-user/path`) });
+    mcp.transcript.push({ label: "host_leak", response: textResponse("/home/private/path") });
     writeJson(out, "02-live-mcp-transcript.json", mcp);
     const png = Buffer.from(readFileSync(join(out, "intact.png")));
     png.fill(17, png.length - 20, png.length - 16);

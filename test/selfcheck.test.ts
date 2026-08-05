@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DoctorReport } from "../src/cli/doctor.ts";
-import { POSIX_HOME_PREFIX } from "../src/core/host-path-egress.ts";
 import {
   performSelfcheck,
   resolveSelfMcpCommand,
@@ -53,7 +52,7 @@ function fakeClient(options: FakeOptions = {}) {
           text: JSON.stringify({
             query_id: "q-selfcheck",
             results,
-            ...(leakSearch ? { leak: `${POSIX_HOME_PREFIX}example-user/secret` } : {}),
+            ...(leakSearch ? { leak: "/home/operator/secret" } : {}),
           }),
         }],
       };
@@ -135,12 +134,12 @@ describe("performSelfcheck", () => {
     expect(step?.message).toContain("absolute path");
   });
 
-  it("fails path-egress when any MCP tool output contains a POSIX home path", async () => {
+  it("fails path-egress when any MCP tool output contains /home/", async () => {
     const { client } = fakeClient({ leakSearch: true });
     const report = await performSelfcheck(deps(client));
     const step = report.steps.find((candidate) => candidate.name === "path-egress");
     expect(step?.ok).toBe(false);
-    expect(step?.message).toContain(`leaks ${POSIX_HOME_PREFIX}`);
+    expect(step?.message).toContain("leaks /home/");
   });
 
   it("reports every dependent step failed when MCP startup is injected to fail", async () => {

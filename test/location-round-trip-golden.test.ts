@@ -10,26 +10,26 @@ import {
 import { LOCATION_ROUND_TRIP_GOLDEN } from "./fixtures/cross-adapter/location-round-trip-golden.ts";
 
 const FIXTURE_CTX: ScanRootContext = {
-  cwd: "/memex-test-home/project",
+  cwd: "/home/user/project",
   syncEnabled: true,
-  syncRepoDir: "/memex-test-home/.memex/sync",
-  globalSkillsDirs: ["/memex-test-home/.grok/skills", "/memex-test-home/.claude/skills"],
-  globalRulesDirs: ["/memex-test-home/.grok/rules"],
-  projectSkillsDir: "/memex-test-home/project/.grok/skills",
-  projectRulesDir: "/memex-test-home/project/.grok/rules",
+  syncRepoDir: "/home/user/.memex/sync",
+  globalSkillsDirs: ["/home/user/.grok/skills", "/home/user/.claude/skills"],
+  globalRulesDirs: ["/home/user/.grok/rules"],
+  projectSkillsDir: "/home/user/project/.grok/skills",
+  projectRulesDir: "/home/user/project/.grok/rules",
   harness: "grok",
 };
 
 function fixtureRegistry() {
   return buildScanRoots(FIXTURE_CTX, {
     skillDirs: [
-      "/memex-test-home/.grok/skills",
-      "/memex-test-home/project/.grok/skills",
-      "/memex-test-home/.memex/sync/skills",
+      "/home/user/.grok/skills",
+      "/home/user/project/.grok/skills",
+      "/home/user/.memex/sync/skills",
       "/opt/extra/skills",
     ],
-    memoryDirs: ["/memex-test-home/project/.grok/memories"],
-    ruleDirs: ["/memex-test-home/.grok/rules", "/memex-test-home/.memex/sync/rules"],
+    memoryDirs: ["/home/user/project/.grok/memories"],
+    ruleDirs: ["/home/user/.grok/rules", "/home/user/.memex/sync/rules"],
   });
 }
 

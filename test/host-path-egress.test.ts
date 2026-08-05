@@ -1,16 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { assertNoHostPathLeaks, POSIX_HOME_PREFIX, scrubHostPaths } from "../src/core/host-path-egress.ts";
-
-const ABSOLUTE_HOME_FIXTURE = `${POSIX_HOME_PREFIX}example-user`;
+import { assertNoHostPathLeaks, scrubHostPaths } from "../src/core/host-path-egress.ts";
 
 describe("scrubHostPaths", () => {
-  it("abbreviates the live home directory and any generic POSIX home prefix", () => {
+  it("abbreviates the live home directory and any /home/<user> prefix", () => {
     const text =
-      `present and runnable (${ABSOLUTE_HOME_FIXTURE}/.cache/memex-grok/memex-grok); deferring to ${ABSOLUTE_HOME_FIXTURE}/.local/share/memex-claude`;
-    const scrubbed = scrubHostPaths(text, ABSOLUTE_HOME_FIXTURE);
+      "present and runnable (/memex-test-home/.cache/memex-grok/memex-grok); deferring to /memex-test-home/.local/share/memex-claude";
+    const scrubbed = scrubHostPaths(text, "/memex-test-home");
     expect(scrubbed).toBe(
       "present and runnable (~/.cache/memex-grok/memex-grok); deferring to ~/.local/share/memex-claude",
     );
-    assertNoHostPathLeaks(scrubbed, ABSOLUTE_HOME_FIXTURE);
+    assertNoHostPathLeaks(scrubbed, "/memex-test-home");
   });
 });

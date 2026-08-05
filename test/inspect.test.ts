@@ -12,7 +12,6 @@ import {
   type InspectDeps,
 } from "../src/cli/inspect.ts";
 import type { McpToolResult, SelfcheckMcpClient } from "../src/cli/selfcheck.ts";
-import { POSIX_HOME_PREFIX } from "../src/core/host-path-egress.ts";
 
 function output() {
   let value = "";
@@ -167,7 +166,7 @@ describe("operator-readable inspection", () => {
       expect(code).toBe(1);
       expect(fake.callTool).toHaveBeenCalledWith("memex_read_skill", { location: target });
       expect(stderr.value()).toBe("memex: read: absolute paths and traversal handles are rejected\n");
-      expect(stderr.value()).not.toContain(POSIX_HOME_PREFIX);
+      expect(stderr.value()).not.toContain("/home/");
     }
   });
 

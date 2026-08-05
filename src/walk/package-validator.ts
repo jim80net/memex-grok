@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { inspectCaptureManifest } from "../capture/clipping-detector.ts";
-import { POSIX_HOME_PREFIX } from "../core/host-path-egress.ts";
 
 export const SCHEMA_LABELS = [
   "status_extra_argument", "status_arguments_null", "status_arguments_array",
@@ -93,8 +92,7 @@ export function validateWalkPackage(out: string, source: string, nonce: string):
   const traversal = mcpByLabel.get("security_traversal_handle");
   check("security_paths_rejected", Boolean(absolute && traversal && isToolError(absolute.response) && isToolError(traversal.response)), { absolute: absolute?.response, traversal: traversal?.response });
   const toolText = mcp.transcript.map((entry: Json) => responseText(entry.response)).join("\n");
-  const hostPathOccurrences = toolText.split(POSIX_HOME_PREFIX).length - 1;
-  check("no_host_path_egress", hostPathOccurrences === 0, { occurrences: hostPathOccurrences });
+  check("no_host_path_egress", !toolText.includes("/home/"), { occurrences: (toolText.match(/\/home\//g) ?? []).length });
   const locations = populated.flatMap((entry: Json) => entry.results ?? []).map((result: Json) => result.location);
   check("portable_locations_only", locations.length > 0 && locations.every((location: unknown) => typeof location === "string" && location.startsWith("memex://") && !location.includes("..")), { count: locations.length });
 
