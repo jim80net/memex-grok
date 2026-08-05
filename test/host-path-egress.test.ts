@@ -4,11 +4,11 @@ import { assertNoHostPathLeaks, scrubHostPaths } from "../src/core/host-path-egr
 describe("scrubHostPaths", () => {
   it("abbreviates the live home directory and any /home/<user> prefix", () => {
     const text =
-      "present and runnable (/home/jim/.cache/memex-grok/memex-grok); deferring to /home/jim/.local/share/memex-claude";
-    const scrubbed = scrubHostPaths(text, "/home/jim");
+      "present and runnable (/memex-test-home/.cache/memex-grok/memex-grok); deferring to /memex-test-home/.local/share/memex-claude";
+    const scrubbed = scrubHostPaths(text, "/memex-test-home");
     expect(scrubbed).toBe(
       "present and runnable (~/.cache/memex-grok/memex-grok); deferring to ~/.local/share/memex-claude",
     );
-    assertNoHostPathLeaks(scrubbed, "/home/jim");
+    assertNoHostPathLeaks(scrubbed, "/memex-test-home");
   });
 });

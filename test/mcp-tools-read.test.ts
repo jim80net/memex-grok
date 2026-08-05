@@ -94,7 +94,7 @@ describe("memex_read_skill tool", () => {
   it("scrubs /home/ from skill body before returning (#22)", async () => {
     const abs = join(home, ".grok", "skills", "leaky", "SKILL.md");
     const handle = portableHandle(abs);
-    const leaky = "See config at /home/jim/x for details";
+    const leaky = `See config at ${home}/x for details`;
     const index = { readSkillContent: vi.fn().mockResolvedValue(leaky), search: vi.fn() };
     const tool = makeReadSkillTool({ index: index as any, registry, recordMatch: vi.fn(), sessionId: () => "s-1" });
     const result = await tool.call({ location: handle });
