@@ -32,7 +32,7 @@ grok -p "Call probe-echo__probe_echo with {\"message\":\"PASS_MARKER_7q2\"}" \
   "source": {
     "type": "plugin",
     "plugin_name": "probe-mcp",
-    "path": "/home/jim/.grok/installed-plugins/probe-mcp-plugin-63e78c32"
+    "path": "$HOME/.grok/installed-plugins/probe-mcp-plugin-63e78c32"
   }
 }
 ```

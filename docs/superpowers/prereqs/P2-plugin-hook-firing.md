@@ -29,11 +29,11 @@ wc -l /tmp/p2-probe.log    # check whether the hook fired
 {
   "event": "(plugin)",
   "hookType": "file",
-  "target": "/home/jim/.grok/installed-plugins/probe-hook-plugin-d7c3c213/hooks/hooks.json",
+  "target": "$HOME/.grok/installed-plugins/probe-hook-plugin-d7c3c213/hooks/hooks.json",
   "source": {
     "type": "plugin",
     "plugin_name": "probe-hooks",
-    "path": "/home/jim/.grok/installed-plugins/probe-hook-plugin-d7c3c213"
+    "path": "$HOME/.grok/installed-plugins/probe-hook-plugin-d7c3c213"
   }
 }
 ```

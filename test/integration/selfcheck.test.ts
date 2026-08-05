@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { arch, platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { POSIX_HOME_PREFIX } from "../../src/core/host-path-egress.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..");
 const DIST_ENTRYPOINT = join(ROOT, "dist", `${platform()}-${arch()}`, "memex");
@@ -60,6 +61,6 @@ describe.skipIf(!built)("deployed selfcheck (run `pnpm build` first)", () => {
       hits: 1,
     });
     expect(report.steps?.find((step) => step.name === "read_skill")?.details?.content_length).toBeGreaterThan(100);
-    expect(selfcheck.stdout).not.toContain("/home/");
+    expect(selfcheck.stdout).not.toContain(POSIX_HOME_PREFIX);
   }, 190_000);
 });
