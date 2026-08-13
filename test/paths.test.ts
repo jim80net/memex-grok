@@ -43,6 +43,16 @@ describe("getGrokPaths", () => {
     ]);
   });
 
+  it("roots harness project memory under ~/.grok/memex/projects", async () => {
+    const { getGrokPaths, getProjectMemoryDir } = await import("../src/core/paths.ts");
+    const { encodeProjectPath } = await import("@jim80net/memex-core");
+    const p = getGrokPaths();
+    expect(p.projectsDir).toBe(join("/tmp/fake-home", ".grok", "memex", "projects"));
+    expect(getProjectMemoryDir("/work/repo", p.projectsDir)).toBe(
+      join(p.projectsDir, encodeProjectPath("/work/repo"), "memory"),
+    );
+  });
+
   it("exposes config and binary cache paths", async () => {
     const { getGrokPaths } = await import("../src/core/paths.ts");
     const p = getGrokPaths();

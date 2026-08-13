@@ -4,7 +4,7 @@ import { DEFAULT_CONFIG } from "../src/core/config.ts";
 import { buildGrokScanRootRegistry } from "../src/mcp/location-handle.ts";
 import { getGrokPaths } from "../src/core/paths.ts";
 
-const registry = buildGrokScanRootRegistry("/work", DEFAULT_CONFIG, getGrokPaths());
+const registry = await buildGrokScanRootRegistry("/work", DEFAULT_CONFIG, getGrokPaths());
 
 function makeDeps(config = DEFAULT_CONFIG) {
   return {

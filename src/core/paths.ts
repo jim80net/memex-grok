@@ -1,4 +1,4 @@
-import { defaultOriginRoot } from "@jim80net/memex-core";
+import { defaultOriginRoot, encodeProjectPath } from "@jim80net/memex-core";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,11 @@ export interface GrokPaths {
    * — do not treat this alone as the live origin when XDG/legacy paths exist.
    */
   syncRepoDir: string;
+  /**
+   * Harness-owned project memory base (`~/.grok/memex/projects`).
+   * Same role as Claude `~/.claude/projects` and Codex `$CODEX_HOME/memex/projects`.
+   */
+  projectsDir: string;
   telemetryPath: string;
   configPath: string;
   binaryCacheDir: string;
@@ -28,6 +33,7 @@ export function getGrokPaths(): GrokPaths {
     sessionsDir: join(cacheDir, "sessions"),
     // Product default from core; live origin via resolveOriginRoot at runtime.
     syncRepoDir: defaultOriginRoot(home),
+    projectsDir: join(home, ".grok", "memex", "projects"),
     telemetryPath: join(cacheDir, "memex-telemetry.json"),
     configPath: join(home, ".grok", "memex.json"),
     binaryCacheDir: join(home, ".cache", "memex-grok"),
@@ -39,6 +45,10 @@ export function getGrokPaths(): GrokPaths {
       join(home, ".grok", "rules"),
     ],
   };
+}
+
+export function getProjectMemoryDir(cwd: string, projectsDir: string): string {
+  return join(projectsDir, encodeProjectPath(cwd), "memory");
 }
 
 export function getProjectSkillsDirs(cwd: string): string[] {

@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import {
   buildScanRoots,
   resolvePortableLocationResolved,
+  type ScanDirs,
   type ScanRoot,
   type ScanRootRegistry,
 } from "@jim80net/memex-core";
@@ -12,12 +13,13 @@ import { getGrokPaths, type GrokPaths } from "../core/paths.ts";
 export type { ScanRootRegistry };
 
 /** Labeled scan roots for grok harness — delegates to memex-core buildScanRoots. */
-export function buildGrokScanRootRegistry(
+export async function buildGrokScanRootRegistry(
   cwd: string,
   config: GrokRouterConfig,
   paths: GrokPaths = getGrokPaths(),
-): ScanRootRegistry {
-  const scanDirs = buildScanDirs(cwd, config, paths);
+  scanDirs?: ScanDirs,
+): Promise<ScanRootRegistry> {
+  const dirs = scanDirs ?? await buildScanDirs(cwd, config, paths);
   const registry = buildScanRoots(
     {
       cwd,
@@ -29,7 +31,7 @@ export function buildGrokScanRootRegistry(
       projectSkillsDir: join(cwd, ".grok", "skills"),
       projectRulesDir: join(cwd, ".grok", "rules"),
     },
-    scanDirs,
+    dirs,
   );
   // Grok scans peer harness project trees; core labels only this harness's projectSkillsDir.
   return augmentPeerProjectRoots(cwd, registry);

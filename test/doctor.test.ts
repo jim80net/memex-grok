@@ -20,6 +20,7 @@ function fakePaths(over: Partial<GrokPaths> = {}): GrokPaths {
     modelsDir: join(root, "cache", "models"),
     sessionsDir: join(root, "cache", "sessions"),
     syncRepoDir: join(root, "sync"),
+    projectsDir: join(root, "memex", "projects"),
     telemetryPath: join(root, "cache", "telemetry.json"),
     configPath: join(root, "memex.json"),
     binaryCacheDir: join(root, "bin"),
@@ -140,7 +141,17 @@ describe("shared-origin check (resolveOriginRoot)", () => {
     expect(sev(await runChecks(paths, probes()), "shared-origin")).toBe("OK");
   });
   it("absent → WARN (self-initializes / memex init)", async () => {
-    expect(sev(await runChecks(fakePaths(), probes()), "shared-origin")).toBe("WARN");
+    // Isolate HOME: live hosts now have ~/.memex → origin, which would make
+    // resolveOriginRoot report OK even when the injected syncRepoDir is missing.
+    const originalHome = process.env.HOME;
+    const isolatedHome = mkdtempSync(join(tmpdir(), "grok-doctor-no-origin-"));
+    roots.push(isolatedHome);
+    process.env.HOME = isolatedHome;
+    try {
+      expect(sev(await runChecks(fakePaths(), probes()), "shared-origin")).toBe("WARN");
+    } finally {
+      process.env.HOME = originalHome;
+    }
   });
 });
 
@@ -344,11 +355,19 @@ describe("build-stamp Git ordering (#42)", () => {
 
 describe("expected-by-design WARN grouping (#26)", () => {
   it("marks shared-origin/config/hooks WARNs as expectedByDesign", async () => {
-    const r = await runChecks(fakePaths(), probes());
-    for (const name of ["shared-origin", "config", "hooks"]) {
-      const c = r.checks.find((x) => x.name === name);
-      expect(c?.severity).toBe("WARN");
-      expect(c?.expectedByDesign).toBe(true);
+    const originalHome = process.env.HOME;
+    const isolatedHome = mkdtempSync(join(tmpdir(), "grok-doctor-no-origin-"));
+    roots.push(isolatedHome);
+    process.env.HOME = isolatedHome;
+    try {
+      const r = await runChecks(fakePaths(), probes());
+      for (const name of ["shared-origin", "config", "hooks"]) {
+        const c = r.checks.find((x) => x.name === name);
+        expect(c?.severity).toBe("WARN");
+        expect(c?.expectedByDesign).toBe(true);
+      }
+    } finally {
+      process.env.HOME = originalHome;
     }
   });
 });

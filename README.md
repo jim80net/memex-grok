@@ -51,6 +51,10 @@ memex-core owns scope resolution; this adapter consumes it:
 | Flotilla | `flotillas/<flotilla-id>/` | Project-XO subtree shared knowledge |
 | Fleet | `fleet/` | Operator standing rules and constitution |
 
+`memex_search` / `memex_read_skill` also scan harness project memory at
+`~/.grok/memex/projects/<encoded-cwd>/memory`, and — when `sync.enabled` —
+matching origin `projects/*/memory` directories (same contract as the Claude and Codex adapters).
+
 See `memex-core/design/knowledge-scope-three-tier.md`.
 
 ## Status

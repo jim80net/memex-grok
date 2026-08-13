@@ -38,9 +38,9 @@ export async function runMemexMcp(opts: RunMemexMcpOptions): Promise<void> {
   const paths = getGrokPaths();
   const provider = new CompiledLocalEmbeddingProvider(config.embeddingModel, paths.modelsDir);
   const cachePath = join(paths.cacheDir, "memex-cache.json");
-  const registry = buildGrokScanRootRegistry(cwd, config, paths);
+  const scanDirs = await buildScanDirs(cwd, config, paths);
+  const registry = await buildGrokScanRootRegistry(cwd, config, paths, scanDirs);
   const index = new SkillIndex(config, provider, cachePath, { registry });
-  const scanDirs = buildScanDirs(cwd, config, paths);
 
   let indexStats: IndexStats = { size: 0, sourceCounts: {} };
 

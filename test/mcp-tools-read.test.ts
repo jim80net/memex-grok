@@ -8,7 +8,7 @@ import { DEFAULT_CONFIG } from "../src/core/config.ts";
 import { getGrokPaths } from "../src/core/paths.ts";
 
 const cwd = "/work";
-const registry = buildGrokScanRootRegistry(cwd, DEFAULT_CONFIG, getGrokPaths());
+const registry = await buildGrokScanRootRegistry(cwd, DEFAULT_CONFIG, getGrokPaths());
 const home = homedir();
 
 function portableHandle(abs: string): string {
