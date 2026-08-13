@@ -13,6 +13,7 @@ const CROSS_ADAPTER_MEMEX_CORE_RANGE = "0.7.3";
 const CROSS_ADAPTER_MEMEX_CORE_RESOLVED = "0.7.3";
 const APPLICATION_SECURITY_OVERRIDES = {
   esbuild: "0.28.1",
+  nanoid: "3.3.18",
   postcss: "8.5.23",
   protobufjs: "7.6.5",
   sharp: "0.35.3",
