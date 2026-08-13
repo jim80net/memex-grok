@@ -16,6 +16,7 @@ function fakePaths(root: string): GrokPaths {
     modelsDir: join(root, "cache", "models"),
     sessionsDir: join(root, "cache", "sessions"),
     syncRepoDir: join(root, "origin"),
+    projectsDir: join(root, "memex", "projects"),
     telemetryPath: join(root, "cache", "telemetry.json"),
     configPath: join(root, "memex.json"),
     binaryCacheDir: join(root, "bin"),
