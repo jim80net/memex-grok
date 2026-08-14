@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { SkillIndex, SkillType } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
 import { assertNoHostPathLeaks } from "../core/host-path-egress.ts";
+import type { QueryResultMap } from "./query-result-map.ts";
 
 export const DEFAULT_MCP_SEARCH_TOP_K = 5;
 
@@ -9,6 +10,7 @@ export interface SearchDeps {
   index: Pick<SkillIndex, "search">;
   defaultTopK: number;
   defaultThreshold: number;
+  queryResults?: QueryResultMap;
 }
 
 /**
@@ -58,15 +60,20 @@ export function makeSearchTool(deps: SearchDeps): ToolHandler {
 
       const hits = await deps.index.search(query, topK, threshold, types);
       const queryId = `q-${randomBytes(6).toString("hex")}`;
+      const results = hits.map((h) => ({
+        name: h.skill.name,
+        type: h.skill.type,
+        location: h.skill.location,
+        relevance: roundRelevance(h.score),
+        description: h.skill.description,
+      }));
+      deps.queryResults?.record(
+        queryId,
+        results.map((row) => ({ name: row.name, location: row.location })),
+      );
       const payload = {
         query_id: queryId,
-        results: hits.map((h) => ({
-          name: h.skill.name,
-          type: h.skill.type,
-          location: h.skill.location,
-          relevance: roundRelevance(h.score),
-          description: h.skill.description,
-        })),
+        results,
       };
       const text = JSON.stringify(payload, null, 2);
       assertNoHostPathLeaks(text);

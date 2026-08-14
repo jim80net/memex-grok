@@ -5,6 +5,7 @@ import { DEFAULT_MCP_SEARCH_TOP_K, makeSearchTool } from "./tools-search.ts";
 import { makeReadSkillTool, type RecordMatchArgs } from "./tools-read.ts";
 import { makeStatusTool, type IndexStats } from "./tools-status.ts";
 import type { MeasuredSyncStatus } from "../core/sync-state.ts";
+import { QueryResultMap } from "./query-result-map.ts";
 
 export interface MemexToolsDeps {
   config: GrokRouterConfig;
@@ -24,17 +25,20 @@ export interface MemexToolsDeps {
  *   3. memex_status   — installation / index health report
  */
 export function makeMemexTools(deps: MemexToolsDeps): ToolHandler[] {
+  const queryResults = new QueryResultMap();
   const declaredTools = [
     makeSearchTool({
       index: deps.index,
       defaultTopK: DEFAULT_MCP_SEARCH_TOP_K,
       defaultThreshold: deps.config.hooks.UserPromptSubmit.threshold ?? 0.5,
+      queryResults,
     }),
     makeReadSkillTool({
       index: deps.index,
       registry: deps.registry,
       recordMatch: deps.recordMatch,
       sessionId: deps.sessionId,
+      queryResults,
     }),
     makeStatusTool({
       config: deps.config,

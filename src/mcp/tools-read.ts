@@ -2,6 +2,7 @@ import type { ScanRootRegistry, SkillIndex } from "@jim80net/memex-core";
 import type { ToolHandler } from "./server.ts";
 import { assertNoHostPathLeaks, scrubHostPaths } from "../core/host-path-egress.ts";
 import { assertAgentReadLocation } from "./location-handle.ts";
+import type { QueryResultMap } from "./query-result-map.ts";
 
 export interface RecordMatchArgs {
   location: string;
@@ -14,6 +15,7 @@ export interface ReadSkillDeps {
   registry: ScanRootRegistry;
   recordMatch: (args: RecordMatchArgs) => void | Promise<void>;
   sessionId: () => string;
+  queryResults?: QueryResultMap;
 }
 
 /**
@@ -56,9 +58,10 @@ export function makeReadSkillTool(deps: ReadSkillDeps): ToolHandler {
         };
       }
       try {
-        const readLocation = await resolveReadTarget(deps, locationArg, nameArg);
+        const queryId = typeof args.query_id === "string" ? args.query_id.trim() : "";
+        const readLocation = await resolveReadTarget(deps, locationArg, nameArg, queryId);
         const content = await deps.index.readSkillContent(readLocation);
-        const qid = typeof args.query_id === "string" ? args.query_id : null;
+        const qid = queryId || null;
         if (qid) {
           try {
             await deps.recordMatch({ location: readLocation, queryId: qid, sessionId: deps.sessionId() });
@@ -81,14 +84,25 @@ async function resolveReadTarget(
   deps: ReadSkillDeps,
   locationArg: string,
   nameArg: string,
+  queryId: string,
 ): Promise<string> {
   if (locationArg) {
     return assertAgentReadLocation(deps.registry, locationArg);
   }
+  if (queryId) {
+    if (!deps.queryResults) {
+      throw new Error(`unknown query_id '${queryId}'`);
+    }
+    return assertAgentReadLocation(deps.registry, deps.queryResults.lookup(queryId, nameArg));
+  }
   const hits = await deps.index.search(nameArg, 20, 0);
-  const exact = hits.find((h) => h.skill.name === nameArg);
-  if (!exact) {
+  const exact = hits.filter((h) => h.skill.name === nameArg);
+  if (exact.length === 0) {
     throw new Error(`no indexed entry with name '${nameArg}'`);
   }
-  return assertAgentReadLocation(deps.registry, exact.skill.location);
+  const locations = [...new Set(exact.map((h) => h.skill.location))];
+  if (locations.length > 1) {
+    throw new Error(`ambiguous name '${nameArg}' (${exact.length} exact matches)`);
+  }
+  return assertAgentReadLocation(deps.registry, locations[0]!);
 }
