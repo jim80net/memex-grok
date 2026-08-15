@@ -85,6 +85,31 @@ describe("buildScanDirs", () => {
     expect(dirs.memoryDirs).toContain(join(syncDir, "projects", canonical, "memory"));
   });
 
+  it("includes origin project memory from matching and non-matching cwds when sync.enabled", async () => {
+    const { existsSync } = await import("node:fs");
+    const syncDir = join(tmpHome, "syncrepo");
+    const matchingCwd = "/work/repo";
+    const otherCwd = "/work/unrelated";
+    const canonical = "github.com/acme/repo";
+    const originMem = join(syncDir, "projects", canonical, "memory");
+    await mkdir(originMem, { recursive: true });
+    const cfg = {
+      ...DEFAULT_CONFIG,
+      sync: {
+        ...DEFAULT_CONFIG.sync,
+        enabled: true,
+        repoDir: syncDir,
+        projectMappings: { [matchingCwd]: canonical },
+      },
+    };
+    const { buildScanDirs } = await import("../src/core/index-init.ts");
+    const fromMatching = await buildScanDirs(matchingCwd, cfg);
+    const fromOther = await buildScanDirs(otherCwd, cfg);
+    expect(fromMatching.memoryDirs).toContain(originMem);
+    expect(fromOther.memoryDirs).toContain(originMem);
+    expect(existsSync(join(tmpHome, ".grok", "memex", "projects"))).toBe(false);
+  });
+
   it("includes origin _local project memory fallback when that dir exists", async () => {
     const { encodeProjectPath } = await import("@jim80net/memex-core");
     const syncDir = join(tmpHome, "syncrepo");
