@@ -20,8 +20,8 @@ import {
   type SyncConfig,
   type SyncProfile,
 } from "@jim80net/memex-core";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, stat } from "node:fs/promises";
+import { join, relative } from "node:path";
 import type { GrokRouterConfig } from "./config.ts";
 import {
   getGrokPaths,
@@ -92,6 +92,80 @@ export function buildGrokProjectionTargets(
 }
 
 /**
+ * Existing origin `projects/<id>/memory` directories, including `_local`.
+ * Does not create directories. Does not descend into a `memory/` leaf.
+ */
+async function listOriginProjectMemoryDirs(repoDir: string): Promise<string[]> {
+  const projectsDir = join(repoDir, "projects");
+  const found: string[] = [];
+
+  async function walk(absDir: string): Promise<void> {
+    let names: string[];
+    try {
+      names = await readdir(absDir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      const child = join(absDir, name);
+      const st = await stat(child).catch(() => null);
+      if (st === null || !st.isDirectory()) {
+        continue;
+      }
+      if (name === "memory") {
+        found.push(child);
+        continue;
+      }
+      await walk(child);
+    }
+  }
+
+  await walk(projectsDir);
+  return found;
+}
+
+/**
+ * Project existing origin project memories into the Grok native tree
+ * (`paths.projectsDir/<id>/memory`) as file symlinks. Uses the origin
+ * canonical id, not `encodeProjectPath(cwd)`. Origin missing → [].
+ */
+export async function buildGrokMemoryProjectionTargets(
+  originRoot: string,
+  originExists: boolean,
+  paths: GrokPaths,
+): Promise<ProjectionTarget[]> {
+  if (!originExists) {
+    return [];
+  }
+  const found = await listOriginProjectMemoryDirs(originRoot);
+  const targets: ProjectionTarget[] = [];
+  for (const absMemory of found) {
+    const originRelDir = relative(originRoot, absMemory).split("\\").join("/");
+    if (
+      originRelDir === "" ||
+      originRelDir.startsWith("..") ||
+      !originRelDir.startsWith("projects/") ||
+      !originRelDir.endsWith("/memory")
+    ) {
+      continue;
+    }
+    const id = originRelDir.slice("projects/".length, -"/memory".length);
+    if (id.length === 0) {
+      continue;
+    }
+    targets.push({
+      id: `grok-project-memory:${id}`,
+      targetDir: join(paths.projectsDir, id, "memory"),
+      originRelDir,
+      entryKind: "files",
+      pattern: "*.md",
+      initTargetDir: true,
+    });
+  }
+  return targets;
+}
+
+/**
  * Construct a SyncProfile from grok config (legacy SyncConfig bridge).
  * Prefer core types only — no forked origin schema.
  */
@@ -149,7 +223,8 @@ export async function resolveGrokOrigin(
 }
 
 /**
- * Ensure origin exists, optionally pull remote, plan + apply rules projection.
+ * Ensure origin exists, optionally pull remote, plan + apply rules and
+ * origin project-memory projection. Does not change search scan dirs.
  */
 export async function runGrokProjection(
   opts: ProjectionRunOptions,
@@ -190,7 +265,10 @@ export async function runGrokProjection(
     pullMessage = await syncPull(coreSync, origin.root);
   }
 
-  const targets = buildGrokProjectionTargets(cwd, paths);
+  const targets = [
+    ...buildGrokProjectionTargets(cwd, paths),
+    ...(await buildGrokMemoryProjectionTargets(origin.root, origin.exists, paths)),
+  ];
   const plan = await planProjection(origin.root, targets, { relinkManaged: true });
 
   if (dryRun) {

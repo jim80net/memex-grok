@@ -172,3 +172,142 @@ describe("runGrokProjection", () => {
     await expect(lstat(join(paths.globalRulesDirs[0]!, "x.md"))).rejects.toThrow();
   });
 });
+
+describe("origin project memory projection", () => {
+  let root: string;
+  let paths: GrokPaths;
+
+  beforeEach(async () => {
+    root = join(tmpdir(), `mg-memproj-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    await mkdir(root, { recursive: true });
+    paths = fakePaths(root);
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  function enabledConfig(origin: string): typeof DEFAULT_CONFIG {
+    return {
+      ...DEFAULT_CONFIG,
+      sync: { ...DEFAULT_CONFIG.sync, enabled: true, repoDir: origin, autoPull: false },
+    };
+  }
+
+  it("dry-run plans origin project memories onto native dir using origin id", async () => {
+    const { existsSync } = await import("node:fs");
+    const { encodeProjectPath } = await import("@jim80net/memex-core");
+    const origin = paths.syncRepoDir;
+    const canonical = "github.com/acme/repo";
+    const noteRel = join("projects", canonical, "memory", "note.md");
+    await mkdir(join(origin, "projects", canonical, "memory"), { recursive: true });
+    await writeFile(join(origin, noteRel), "# note\n", "utf8");
+    await mkdir(join(origin, "rules"), { recursive: true });
+    await writeFile(join(origin, "rules", "keep.md"), "# keep\n", "utf8");
+
+    const { buildGrokMemoryProjectionTargets, runGrokProjection } = await import(
+      "../src/core/projection.ts"
+    );
+    const memoryTargets = await buildGrokMemoryProjectionTargets(origin, true, paths);
+    expect(memoryTargets).toEqual([
+      {
+        id: `grok-project-memory:${canonical}`,
+        targetDir: join(paths.projectsDir, canonical, "memory"),
+        originRelDir: `projects/${canonical}/memory`,
+        entryKind: "files",
+        pattern: "*.md",
+        initTargetDir: true,
+      },
+    ]);
+    expect(memoryTargets[0]!.targetDir).not.toContain(encodeProjectPath("/work/repo"));
+
+    const report = await runGrokProjection({
+      config: enabledConfig(origin),
+      paths,
+      cwd: "/work/repo",
+      homeDir: root,
+      dryRun: true,
+    });
+    expect(report.plan).not.toBeNull();
+    const planned = report.plan!.links.map((link) => link.originPath);
+    expect(planned).toContain(join(origin, noteRel));
+    expect(planned).toContain(join(origin, "rules", "keep.md"));
+    expect(existsSync(paths.projectsDir)).toBe(false);
+  });
+
+  it("origin missing yields zero memory targets and does not mkdir projectsDir", async () => {
+    const { existsSync } = await import("node:fs");
+    const missing = join(root, "missing-origin");
+    const { buildGrokMemoryProjectionTargets, runGrokProjection } = await import(
+      "../src/core/projection.ts"
+    );
+    expect(await buildGrokMemoryProjectionTargets(missing, false, paths)).toEqual([]);
+
+    const report = await runGrokProjection({
+      config: enabledConfig(missing),
+      paths,
+      cwd: "/work/repo",
+      homeDir: root,
+      dryRun: true,
+    });
+    expect(report.origin?.exists).toBe(false);
+    expect(
+      report.plan?.links.some((link) => link.originPath.includes(`${join("projects")}`)),
+    ).toBe(false);
+    expect(existsSync(paths.projectsDir)).toBe(false);
+    expect(existsSync(join(root, "memex"))).toBe(false);
+  });
+
+  it("origin without projects/ yields zero memory targets and leaves rules target unchanged", async () => {
+    const { existsSync } = await import("node:fs");
+    const origin = paths.syncRepoDir;
+    await mkdir(join(origin, "rules"), { recursive: true });
+    await writeFile(join(origin, "rules", "keep.md"), "# keep\n", "utf8");
+
+    const { buildGrokMemoryProjectionTargets, buildGrokProjectionTargets, runGrokProjection } =
+      await import("../src/core/projection.ts");
+    expect(await buildGrokMemoryProjectionTargets(origin, true, paths)).toEqual([]);
+    const rules = buildGrokProjectionTargets("/work/repo", paths);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]!.id).toBe("grok-user-rules");
+
+    const report = await runGrokProjection({
+      config: enabledConfig(origin),
+      paths,
+      cwd: "/work/repo",
+      homeDir: root,
+      dryRun: true,
+    });
+    expect(report.plan?.links.map((link) => link.originPath)).toEqual([
+      join(origin, "rules", "keep.md"),
+    ]);
+    expect(existsSync(paths.projectsDir)).toBe(false);
+  });
+
+  it("real file at harness memory path is a real-file conflict", async () => {
+    const origin = paths.syncRepoDir;
+    const canonical = "github.com/acme/repo";
+    const noteRel = join("projects", canonical, "memory", "note.md");
+    await mkdir(join(origin, "projects", canonical, "memory"), { recursive: true });
+    await writeFile(join(origin, noteRel), "origin-note\n", "utf8");
+    const harnessNote = join(paths.projectsDir, canonical, "memory", "note.md");
+    await mkdir(join(paths.projectsDir, canonical, "memory"), { recursive: true });
+    await writeFile(harnessNote, "local-real\n", "utf8");
+
+    const { runGrokProjection } = await import("../src/core/projection.ts");
+    const report = await runGrokProjection({
+      config: enabledConfig(origin),
+      paths,
+      cwd: "/work/repo",
+      homeDir: root,
+      dryRun: true,
+    });
+    expect(
+      report.plan?.conflicts.some(
+        (conflict) => conflict.reason === "real-file" && conflict.targetPath === harnessNote,
+      ),
+    ).toBe(true);
+    const { lstat } = await import("node:fs/promises");
+    expect((await lstat(harnessNote)).isSymbolicLink()).toBe(false);
+  });
+});
